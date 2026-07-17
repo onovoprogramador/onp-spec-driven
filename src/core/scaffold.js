@@ -83,8 +83,22 @@ export function scaffoldTests(project, featureName, { force = false } = {}) {
     }
   }
 
-  if (pending.length === 0) {
-    return { created: null, pending: 0, message: 'todos os ACs já têm teste anotado' };
+  // princípios [DEVE]/[RECOMENDADO] com verificação(teste) sem tag ainda:
+  // o esqueleto nasce junto — senão o gate exige um teste que nenhum passo cria
+  const taggedPrinciples = new Set(
+    project.annotations.principleTags.filter((t) => testFileSet.has(t.file)).map((t) => t.principleId)
+  );
+  const pendingPrinciples = [];
+  for (const p of project.constitution?.principles || []) {
+    for (const check of p.checks) {
+      if (check.kind === 'teste' && !taggedPrinciples.has(check.principleTag)) {
+        pendingPrinciples.push({ principle: p, tag: check.principleTag });
+      }
+    }
+  }
+
+  if (pending.length === 0 && pendingPrinciples.length === 0) {
+    return { created: null, pending: 0, message: 'todos os ACs (e princípios) já têm teste anotado' };
   }
   if (existsSync(outPath) && !force) {
     throw new Error(
@@ -96,10 +110,16 @@ export function scaffoldTests(project, featureName, { force = false } = {}) {
   if (style === 'pytest') {
     content = `# Testes de spec da feature ${featureName} — gerados por onp-spec scaffold\n\n`;
     content += pending.map(({ story, ac }) => renderPyTest(story, ac)).join('\n\n');
+    content += pendingPrinciples
+      .map(({ principle, tag }) => `\n\n${renderPyPrinciple(principle, tag)}`)
+      .join('');
     content += '\n';
   } else {
     content = `// Testes de spec da feature ${featureName} — gerados por onp-spec scaffold\n${jsHeader(style)}\n`;
     content += pending.map(({ story, ac }) => renderJsTest(style, story, ac)).join('\n\n');
+    content += pendingPrinciples
+      .map(({ principle, tag }) => `\n\n${renderJsPrinciple(style, principle, tag)}`)
+      .join('');
     content += '\n';
   }
 
@@ -108,7 +128,31 @@ export function scaffoldTests(project, featureName, { force = false } = {}) {
 
   return {
     created: path.relative(config.rootDir, outPath),
-    pending: pending.length,
-    acIds: pending.map((p) => p.ac.id),
+    pending: pending.length + pendingPrinciples.length,
+    acIds: [
+      ...pending.map((p) => p.ac.id),
+      ...pendingPrinciples.map((p) => p.tag),
+    ],
   };
+}
+
+function renderJsPrinciple(style, principle, tag) {
+  const lines = [];
+  lines.push(`// ${principle.id} [${principle.level}] — ${principle.title}`);
+  lines.push(
+    `test('${principle.id}: ${principle.title.replace(/'/g, "\\'")} @principle:${tag}', () => {`
+  );
+  lines.push(jsFail(style, `princípio ${principle.id} ainda não provado — implemente este teste`));
+  lines.push('});');
+  return lines.join('\n');
+}
+
+function renderPyPrinciple(principle, tag) {
+  const fn = tag.toLowerCase().replace(/-/g, '_');
+  const lines = [];
+  lines.push(`# ${principle.id} [${principle.level}] — ${principle.title}`);
+  lines.push(`def test_${fn}():`);
+  lines.push(`    """${principle.id}: ${principle.title} @principle:${tag}"""`);
+  lines.push(`    raise AssertionError("princípio ${principle.id} ainda não provado — implemente este teste")`);
+  return lines.join('\n');
 }

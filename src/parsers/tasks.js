@@ -3,15 +3,17 @@
 //   ## T-001 — Título [pendente|em-andamento|concluida]
 //   - Refs: US-001, AC-001, AC-002
 //   - Arquivos: src/models/entrega.js, src/routes/entrega.js
+//
+// Status é normalizado (minúsculas, sem acento): "[Concluída]" conta como
+// concluida. Token desconhecido em [...] vira TASK_STATUS_INVALIDO — nunca
+// degrada para "pendente" em silêncio (furaria o gate TASK_CONCLUIDA_SEM_PROVA).
 
-import { DASH, splitLines } from '../util/text.js';
+import { DASH, splitLines, foldStatus } from '../util/text.js';
 
-const RE_TASK = new RegExp(
-  `^##\\s+(T-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*\\[(pendente|em-andamento|concluida)\\]\\s*$`
-);
-const RE_TASK_NO_STATUS = new RegExp(`^##\\s+(T-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*$`);
-const RE_REFS = /^-\s*Refs\s*:\s*(.+?)\s*$/i;
-const RE_FILES = /^-\s*Arquivos\s*:\s*(.+?)\s*$/i;
+const RE_TASK_ANY = new RegExp(`^##\\s+(T-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*$`);
+const RE_STATUS_SUFFIX = /^(.*?)\s*\[([^\]]+)\]\s*$/;
+const RE_REFS = /^\s*[-*]\s*Refs\s*:\s*(.+?)\s*$/i;
+const RE_FILES = /^\s*[-*]\s*Arquivos\s*:\s*(.+?)\s*$/i;
 
 export const TASK_STATUSES = ['pendente', 'em-andamento', 'concluida'];
 
@@ -24,36 +26,35 @@ export function parseTasks(content, { file = 'tasks.md' } = {}) {
     const line = lines[i];
     const lineNo = i + 1;
 
-    const task = line.match(RE_TASK);
+    const task = line.match(RE_TASK_ANY);
     if (task) {
-      current = {
-        id: task[1],
-        title: task[2],
-        status: task[3],
-        line: lineNo,
-        refs: [],
-        files: [],
-      };
+      let title = task[2];
+      let status = null;
+      const suffix = title.match(RE_STATUS_SUFFIX);
+      if (suffix) {
+        const folded = foldStatus(suffix[2].trim());
+        if (TASK_STATUSES.includes(folded)) {
+          title = suffix[1].trim();
+          status = folded;
+        } else {
+          title = suffix[1].trim();
+          status = 'pendente';
+          result.parseIssues.push({
+            code: 'TASK_STATUS_INVALIDO',
+            line: lineNo,
+            message: `${task[1]}: status "[${suffix[2]}]" não é um de: ${TASK_STATUSES.join(', ')}`,
+          });
+        }
+      } else {
+        status = 'pendente';
+        result.parseIssues.push({
+          code: 'TASK_SEM_STATUS',
+          line: lineNo,
+          message: `${task[1]} sem status explícito — assumindo [pendente]`,
+        });
+      }
+      current = { id: task[1], title, status, line: lineNo, refs: [], files: [] };
       result.tasks.push(current);
-      continue;
-    }
-
-    const noStatus = line.match(RE_TASK_NO_STATUS);
-    if (noStatus) {
-      current = {
-        id: noStatus[1],
-        title: noStatus[2],
-        status: 'pendente',
-        line: lineNo,
-        refs: [],
-        files: [],
-      };
-      result.tasks.push(current);
-      result.parseIssues.push({
-        code: 'TASK_SEM_STATUS',
-        line: lineNo,
-        message: `${noStatus[1]} sem status explícito — assumindo [pendente]`,
-      });
       continue;
     }
 
@@ -81,8 +82,9 @@ export function parseTasks(content, { file = 'tasks.md' } = {}) {
 
     const files = line.match(RE_FILES);
     if (files) {
+      // separa APENAS por vírgula: caminhos com espaço são válidos
       const paths = files[1]
-        .split(/[,\s]+/)
+        .split(',')
         .map((s) => s.trim().replace(/^`|`$/g, ''))
         .filter(Boolean);
       current.files.push(...paths);

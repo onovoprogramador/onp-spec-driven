@@ -14,7 +14,18 @@ export const ID_PATTERNS = {
 };
 
 export function splitLines(content) {
-  return content.split(/\r?\n/);
+  // NFC primeiro: arquivos criados no macOS podem vir em NFD ("Então" decomposto),
+  // o que quebraria o casamento das cláusulas Dado/Quando/Então.
+  return content.normalize('NFC').split(/\r?\n/);
+}
+
+// minúsculas + sem acentos — para casar status escritos por humanos
+// ("Concluída" ⇒ "concluida") sem furar o gate em silêncio.
+export function foldStatus(text) {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
 }
 
 // Linha de tabela markdown → células (sem as bordas vazias).

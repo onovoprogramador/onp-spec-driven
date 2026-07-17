@@ -13,7 +13,20 @@ import { allAcs } from './parsers/spec.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
-const SKILL_DIR = path.join(__dirname, '..', 'skills', 'onp-spec-driven');
+
+// Onde mora a skill: layout do repo (skills/onp-spec-driven) ou layout
+// embarcado (este arquivo em <skill>/scripts/lib/src → a skill é ../../..)
+function resolveSkillDir() {
+  const candidates = [
+    path.join(__dirname, '..', 'skills', 'onp-spec-driven'),
+    path.join(__dirname, '..', '..', '..'),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(path.join(dir, 'SKILL.md'))) return dir;
+  }
+  return null;
+}
+const SKILL_DIR = resolveSkillDir();
 
 const HELP = `onp-spec — spec-anchored development (a spec que continua verdadeira)
 
@@ -109,8 +122,14 @@ function cmdInit(rootDir, flags) {
 
   if (flags.agents === 'claude' || flags.agents === true) {
     const dest = path.join(rootDir, '.claude', 'skills', 'onp-spec-driven');
-    copyDirIfExists(SKILL_DIR, dest);
-    console.log('✔ skill instalada em .claude/skills/onp-spec-driven (Claude Code)');
+    if (!SKILL_DIR) {
+      console.log('· skill não encontrada junto ao motor — nada a instalar');
+    } else if (path.resolve(dest) === path.resolve(SKILL_DIR)) {
+      console.log('· skill já instalada em .claude/skills/onp-spec-driven — mantida');
+    } else {
+      copyDirIfExists(SKILL_DIR, dest);
+      console.log('✔ skill instalada em .claude/skills/onp-spec-driven (Claude Code)');
+    }
   }
 
   console.log('\npróximo passo: onp-spec new <nome-da-feature>');
@@ -238,8 +257,13 @@ export async function run(argv) {
   }
 
   if (command === 'version' || flags.version) {
-    const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-    console.log(pkg.version);
+    try {
+      const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+      console.log(pkg.version);
+    } catch {
+      // motor embarcado na skill não carrega package.json
+      console.log('embarcada (skill onp-spec-driven)');
+    }
     return 0;
   }
 
@@ -270,15 +294,17 @@ export async function run(argv) {
       console.error('uso: onp-spec verify <feature>');
       return 2;
     }
-    const { record } = runVerify(project, featureName);
+    const { record, hint } = runVerify(project, featureName);
     const total = Object.keys(record.results).length;
     const passed = Object.values(record.results).filter((r) => r.status === 'pass').length;
     console.log(
       `verify ${featureName}: ${passed}/${total} AC(s) com prova PASS · ${record.testsParsed} teste(s) lidos · exit ${record.exitCode}`
     );
     for (const [acId, r] of Object.entries(record.results)) {
-      console.log(`  ${r.status === 'pass' ? '✔' : '✘'} ${acId} ${r.testName ? `— ${r.testName}` : ''}`);
+      const mark = r.status === 'pass' ? '✔' : r.status === 'skip' ? '○ SKIP (não é prova)' : '✘';
+      console.log(`  ${mark} ${acId} ${r.testName ? `— ${r.testName}` : ''}`);
     }
+    if (hint) console.log(`  dica: ${hint}`);
     const principles = Object.entries(record.principles || {});
     if (principles.length) {
       console.log('  princípios:');

@@ -61,11 +61,33 @@ export function auditProject(project, { ci = false } = {}) {
 
   const knownAcIds = new Set();
   const acById = new Map();
+  const knownUsIds = new Set();
+  const storyById = new Map();
   for (const feature of project.features) {
     if (!feature.spec) continue;
+    for (const story of feature.spec.stories) {
+      knownUsIds.add(story.id);
+      if (!storyById.has(story.id)) storyById.set(story.id, story);
+    }
     for (const ac of allAcs(feature.spec)) {
       knownAcIds.add(ac.id);
       if (!acById.has(ac.id)) acById.set(ac.id, { ac, feature });
+    }
+  }
+
+  // cobertura de tasks é GLOBAL: IDs são globais, então uma task de qualquer
+  // feature pode cobrir um AC de outra (refs cruzadas são válidas)
+  const globalCoveredAcs = new Set();
+  for (const feature of project.features) {
+    if (!feature.tasks) continue;
+    for (const task of feature.tasks.tasks) {
+      for (const ref of task.refs) {
+        if (ref.startsWith('AC-') && knownAcIds.has(ref)) {
+          globalCoveredAcs.add(ref);
+        } else if (ref.startsWith('US-') && storyById.has(ref)) {
+          for (const ac of storyById.get(ref).acs) globalCoveredAcs.add(ac.id);
+        }
+      }
     }
   }
 
@@ -106,6 +128,43 @@ export function auditProject(project, { ci = false } = {}) {
           feature: name,
           file: spec.file,
         })
+      );
+    }
+
+    if (spec.feature && spec.feature !== name) {
+      findings.push(
+        finding(
+          'FEATURE_DIVERGENTE',
+          'aviso',
+          `"> feature: ${spec.feature}" difere do diretório "${name}"`,
+          { feature: name, file: spec.file }
+        )
+      );
+    }
+
+    // Suposições e Perguntas são cidadãs de primeira classe: a AUSÊNCIA da
+    // seção também é um achado (senão o diferencial vira opcional em silêncio)
+    const specMatured = ['pronta', 'em-implementacao', 'implementada', 'auditada'].includes(
+      spec.status
+    );
+    if (spec.sections && !spec.sections.suposicoes) {
+      findings.push(
+        finding(
+          'SECAO_AUSENTE',
+          specMatured ? 'erro' : 'aviso',
+          `spec sem seção "## Suposições" — registre ASMs ou escreva "Nenhuma." explicitamente`,
+          { feature: name, file: spec.file }
+        )
+      );
+    }
+    if (spec.sections && !spec.sections.perguntas) {
+      findings.push(
+        finding(
+          'SECAO_AUSENTE',
+          specMatured ? 'erro' : 'aviso',
+          `spec sem seção "## Perguntas em aberto" — registre Qs ou escreva "Nenhuma." explicitamente`,
+          { feature: name, file: spec.file }
+        )
       );
     }
 
@@ -189,13 +248,11 @@ export function auditProject(project, { ci = false } = {}) {
 
     // ---------- tasks ----------
     const specAcIds = new Set(allAcs(spec).map((a) => a.id));
-    const specUsIds = new Set(spec.stories.map((s) => s.id));
-    const coveredAcs = new Set();
 
     if (tasks) {
       for (const issue of tasks.parseIssues) {
         findings.push(
-          finding(issue.code, 'aviso', issue.message, {
+          finding(issue.code, issue.code === 'TASK_STATUS_INVALIDO' ? 'erro' : 'aviso', issue.message, {
             feature: name,
             file: tasks.file,
             line: issue.line,
@@ -205,22 +262,17 @@ export function auditProject(project, { ci = false } = {}) {
 
       for (const task of tasks.tasks) {
         for (const ref of task.refs) {
-          const ok = ref.startsWith('US-') ? specUsIds.has(ref) : specAcIds.has(ref);
+          // IDs são globais: uma ref é válida se existe em QUALQUER spec
+          const ok = ref.startsWith('US-') ? knownUsIds.has(ref) : knownAcIds.has(ref);
           if (!ok) {
             findings.push(
               finding(
                 'REF_QUEBRADA',
                 'erro',
-                `${task.id} referencia ${ref}, que não existe na spec de ${name}`,
+                `${task.id} referencia ${ref}, que não existe em nenhuma spec`,
                 { feature: name, file: tasks.file, line: task.line }
               )
             );
-          } else if (ref.startsWith('AC-')) {
-            coveredAcs.add(ref);
-          } else {
-            // US ref cobre todos os ACs da história
-            const story = spec.stories.find((s) => s.id === ref);
-            if (story) for (const ac of story.acs) coveredAcs.add(ac.id);
           }
         }
 
@@ -238,16 +290,19 @@ export function auditProject(project, { ci = false } = {}) {
         }
 
         if (task.status === 'concluida') {
-          const verification = project.verifications[name] || null;
-          const taskAcs = task.refs.filter((r) => r.startsWith('AC-') && specAcIds.has(r));
+          const taskAcs = task.refs.filter((r) => r.startsWith('AC-') && knownAcIds.has(r));
           for (const acId of taskAcs) {
+            // a prova mora na feature DONA do AC (refs podem ser cruzadas)
+            const owner = acById.get(acId);
+            const verification = owner ? project.verifications[owner.feature.name] || null : null;
             const proof = verification?.results?.[acId];
             if (!proof || proof.status !== 'pass') {
+              const why = proof?.status === 'skip' ? ' (o teste foi PULADO — skip não é prova)' : '';
               findings.push(
                 finding(
                   'TASK_CONCLUIDA_SEM_PROVA',
                   'erro',
-                  `${task.id} está [concluida] mas ${acId} não tem prova PASS em verify`,
+                  `${task.id} está [concluida] mas ${acId} não tem prova PASS em verify${why}`,
                   { feature: name, file: tasks.file, line: task.line }
                 )
               );
@@ -257,7 +312,7 @@ export function auditProject(project, { ci = false } = {}) {
       }
 
       for (const ac of allAcs(spec)) {
-        if (!coveredAcs.has(ac.id)) {
+        if (!globalCoveredAcs.has(ac.id)) {
           findings.push(
             finding('AC_SEM_TASK', 'aviso', `${ac.id} (${ac.title}) não é coberto por nenhuma task`, {
               feature: name,
@@ -293,12 +348,24 @@ export function auditProject(project, { ci = false } = {}) {
             )
           );
         } else if (proof.status !== 'pass') {
+          const msg =
+            proof.status === 'skip'
+              ? `${ac.id}: o teste foi PULADO na última verificação (${proof.testName || tags[0].file}) — skip não é prova`
+              : `${ac.id} FALHOU na última verificação (${proof.testName || tags[0].file})`;
+          findings.push(
+            finding('AC_SEM_PROVA', 'erro', msg, {
+              feature: name,
+              file: tags[0].file,
+              line: tags[0].line,
+            })
+          );
+        } else if (proof.method === 'exitcode') {
           findings.push(
             finding(
-              'AC_SEM_PROVA',
-              'erro',
-              `${ac.id} FALHOU na última verificação (${proof.testName || tags[0].file})`,
-              { feature: name, file: tags[0].file, line: tags[0].line }
+              'PROVA_FRACA',
+              'aviso',
+              `${ac.id} provado apenas pelo exit code global (reporter "exitcode") — sem granularidade por teste; prefira tap/vitest-json/jest-json`,
+              { feature: name, file: tags[0]?.file, line: tags[0]?.line }
             )
           );
         }
@@ -395,6 +462,11 @@ export function auditProject(project, { ci = false } = {}) {
         );
       }
       for (const check of p.checks) {
+        if (check.kind === 'gate') {
+          // satisfeita pelo próprio mecanismo do audit (AC_SEM_TESTE,
+          // AC_SEM_PROVA, TASK_CONCLUIDA_SEM_PROVA...) — nada a verificar aqui
+          continue;
+        }
         if (check.kind === 'teste') {
           const tags = testPrincipleTags.filter((t) => t.principleId === check.principleTag);
           if (tags.length === 0) {
@@ -408,12 +480,22 @@ export function auditProject(project, { ci = false } = {}) {
             );
           }
         } else if (check.kind === 'proibido') {
-          const { error, hits } = grepPattern(
+          const { error, hits, files } = grepPattern(
             config.rootDir,
             check.pattern,
             check.glob,
             config.ignoreGlobs
           );
+          if (files.length === 0) {
+            findings.push(
+              finding(
+                'GLOB_SEM_ARQUIVOS',
+                'aviso',
+                `${p.id}: o glob \`${check.glob}\` não casa nenhum arquivo — verificação inerte (typo no glob?)`,
+                { file: constitution.file, line: check.line }
+              )
+            );
+          }
           if (error) {
             findings.push(
               finding('VERIFICACAO_MALFORMADA', 'erro', `${p.id}: ${error}`, {
@@ -439,6 +521,16 @@ export function auditProject(project, { ci = false } = {}) {
             check.glob,
             config.ignoreGlobs
           );
+          if (files.length === 0) {
+            findings.push(
+              finding(
+                'GLOB_SEM_ARQUIVOS',
+                'aviso',
+                `${p.id}: o glob \`${check.glob}\` não casa nenhum arquivo — verificação inerte (typo no glob?)`,
+                { file: constitution.file, line: check.line }
+              )
+            );
+          }
           if (error) {
             findings.push(
               finding('VERIFICACAO_MALFORMADA', 'erro', `${p.id}: ${error}`, {

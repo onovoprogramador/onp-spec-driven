@@ -14,21 +14,30 @@ const RE_PRINCIPLE_TAG = /@principle:(P-\d{3,})/g;
 
 // ---------- parsers de saída ----------
 
-// TAP (node:test, tape, etc.): "ok 1 - título" / "not ok 2 - título"
+// TAP (node:test, tape, etc.): "ok 1 - título" / "not ok 2 - título".
+// Diretivas "# SKIP"/"# TODO" chegam como "ok" no TAP mas NÃO são prova:
+// um teste pulado não pode provar um AC (senão skip = bypass do gate).
 export function parseTap(output) {
   const tests = [];
   for (const line of output.split(/\r?\n/)) {
     const m = line.match(/^\s*(not )?ok\s+\d+\s*(?:-\s*)?(.*)$/);
     if (!m) continue;
-    const title = m[2].trim();
+    let title = m[2].trim();
+    let skip = false;
+    const directive = title.match(/^(.*?)\s+#\s*(SKIP|TODO)\b.*$/i);
+    if (directive) {
+      title = directive[1].trim();
+      skip = true;
+    }
     // ignora linhas de resumo de suíte do node:test (duplicam subtests)
     if (/^tests \d+$/.test(title)) continue;
-    tests.push({ title, pass: !m[1] });
+    tests.push({ title, pass: !m[1] && !skip, skip });
   }
   return tests;
 }
 
-// vitest --reporter=json / jest --json (mesmo shape de assertionResults)
+// vitest --reporter=json / jest --json (mesmo shape de assertionResults).
+// "skipped"/"pending"/"todo"/"disabled" não são prova.
 export function parseJsonReport(jsonText) {
   const data = JSON.parse(jsonText);
   const tests = [];
@@ -37,6 +46,7 @@ export function parseJsonReport(jsonText) {
       tests.push({
         title: [t.fullName, t.title].filter(Boolean).join(' '),
         pass: t.status === 'passed',
+        skip: t.status !== 'passed' && t.status !== 'failed',
       });
     }
   }
@@ -50,25 +60,26 @@ export function extractTags(title) {
 }
 
 // Reduz a lista de testes a um veredito por tag.
-// Regra: TODA ocorrência da tag precisa passar; uma falha derruba o AC.
+// Regra: falha domina passe, passe domina skip. Um AC só provado por testes
+// pulados fica "skip" — que NUNCA conta como prova.
+const STATUS_RANK = { fail: 3, pass: 2, skip: 1 };
+
 export function resultsByTag(tests) {
   const acResults = {}; // AC-xxx -> {status, testName}
   const principleResults = {};
 
+  const merge = (map, id, t) => {
+    const status = t.skip ? 'skip' : t.pass ? 'pass' : 'fail';
+    const prev = map[id];
+    if (!prev || STATUS_RANK[status] > STATUS_RANK[prev.status]) {
+      map[id] = { status, testName: t.title };
+    }
+  };
+
   for (const t of tests) {
     const { acs, principles } = extractTags(t.title);
-    for (const acId of acs) {
-      const prev = acResults[acId];
-      if (!prev || prev.status === 'pass') {
-        acResults[acId] = { status: t.pass ? 'pass' : 'fail', testName: t.title };
-      }
-    }
-    for (const pId of principles) {
-      const prev = principleResults[pId];
-      if (!prev || prev.status === 'pass') {
-        principleResults[pId] = { status: t.pass ? 'pass' : 'fail', testName: t.title };
-      }
-    }
+    for (const acId of acs) merge(acResults, acId, t);
+    for (const pId of principles) merge(principleResults, pId, t);
   }
 
   return { acResults, principleResults };
@@ -150,12 +161,20 @@ export function runVerify(project, featureName) {
 
   const { acResults, principleResults } = resultsByTag(tests);
 
+  // ACs com teste anotado (tag @spec em arquivo de teste) — o reporter
+  // exitcode só concede prova a esses; sem isso, exit 0 provaria até AC
+  // sem teste nenhum.
+  const testFileSet = new Set(project.testFiles);
+  const annotatedAcs = new Set(
+    project.annotations.specTags.filter((t) => testFileSet.has(t.file)).map((t) => t.acId)
+  );
+
   const results = {};
   const featureAcs = allAcs(feature.spec);
   for (const ac of featureAcs) {
     if (acResults[ac.id]) {
       results[ac.id] = { ...acResults[ac.id], method: config.reporter };
-    } else if (config.reporter === 'exitcode') {
+    } else if (config.reporter === 'exitcode' && annotatedAcs.has(ac.id)) {
       // sem per-teste: só o exit code global prova (fraco, mas explícito)
       results[ac.id] = {
         status: proc.status === 0 ? 'pass' : 'fail',
@@ -165,6 +184,13 @@ export function runVerify(project, featureName) {
     }
     // sem tag correspondente → sem entrada → audit acusa AC_SEM_PROVA
   }
+
+  // dica de UX: rodou testes mas nenhum título carrega tag de AC da feature
+  const anyTagMatched = featureAcs.some((ac) => acResults[ac.id]);
+  const hint =
+    tests.length > 0 && !anyTagMatched && config.reporter !== 'exitcode'
+      ? `nenhum título de teste contém @spec:${featureAcs[0]?.id || 'AC-xxx'} — a tag vai no TÍTULO do teste`
+      : null;
 
   const record = {
     feature: featureName,
@@ -185,5 +211,5 @@ export function runVerify(project, featureName) {
     `${JSON.stringify(record, null, 2)}\n`
   );
 
-  return { record, rawOutput: output };
+  return { record, rawOutput: output, hint };
 }

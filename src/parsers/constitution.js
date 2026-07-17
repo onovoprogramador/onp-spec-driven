@@ -12,7 +12,10 @@ import { splitLines } from '../util/text.js';
 
 const RE_VERSION = /v(\d+\.\d+\.\d+)/;
 const RE_PRINCIPLE = /^##\s+(P-\d{3,})\s+\[(DEVE|RECOMENDADO|PODE)\]\s*[—–-]?\s*(.+?)\s*$/;
-const RE_CHECK = /^-\s*verifica(?:ção|cao)\((teste|proibido|obrigat(?:ório|orio))\)\s*:\s*(.+?)\s*$/i;
+// heading de princípio com QUALQUER coisa entre colchetes — para acusar nível
+// inválido em vez de ignorar o princípio em silêncio
+const RE_PRINCIPLE_ANY = /^##\s+(P-\d{3,})\s+\[([^\]]+)\]\s*[—–-]?\s*(.+?)\s*$/;
+const RE_CHECK = /^\s*[-*]\s*verifica(?:ção|cao)\((teste|proibido|obrigat(?:ório|orio)|gate)\)\s*:\s*(.+?)\s*$/i;
 const RE_PATTERN_GLOB = /^`(.+?)`\s+em\s+`(.+?)`$/;
 
 export const OBLIGATION_LEVELS = ['DEVE', 'RECOMENDADO', 'PODE'];
@@ -46,6 +49,27 @@ export function parseConstitution(content, { file = 'constituicao.md' } = {}) {
       continue;
     }
 
+    const badLevel = line.match(RE_PRINCIPLE_ANY);
+    if (badLevel) {
+      result.parseIssues.push({
+        code: 'NIVEL_INVALIDO',
+        line: lineNo,
+        message: `${badLevel[1]}: nível "[${badLevel[2]}]" não é um de: ${OBLIGATION_LEVELS.join(', ')} — princípio seria ignorado`,
+      });
+      // ainda registra o princípio (como DEVE, o mais conservador) para
+      // que as verificações dele não sumam
+      current = {
+        id: badLevel[1],
+        level: 'DEVE',
+        title: badLevel[3],
+        line: lineNo,
+        body: [],
+        checks: [],
+      };
+      result.principles.push(current);
+      continue;
+    }
+
     if (!current) continue;
 
     const check = line.match(RE_CHECK);
@@ -61,6 +85,10 @@ export function parseConstitution(content, { file = 'constituicao.md' } = {}) {
           principleTag: tag ? tag[1] : current.id,
           line: lineNo,
         });
+      } else if (kind === 'gate') {
+        // satisfeita pelo próprio mecanismo do audit (AC_SEM_TESTE/AC_SEM_PROVA
+        // etc.) — usada por princípios "meta" como o P-001 do preset base
+        current.checks.push({ kind: 'gate', line: lineNo });
       } else {
         const pg = value.match(RE_PATTERN_GLOB);
         if (pg) {

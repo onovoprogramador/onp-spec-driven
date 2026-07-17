@@ -12,8 +12,11 @@ import { DASH, splitLines, tableCells, isTableSeparator } from '../util/text.js'
 const RE_META = /^>\s*(feature|status)\s*:\s*(.+?)\s*$/;
 const RE_STORY = new RegExp(`^###\\s+(US-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*$`);
 const RE_AC = new RegExp(`^####\\s+(AC-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*$`);
-const RE_GWT = /^-\s*\*\*(Dado|Quando|Então|Entao|E)\*\*\s*(.+?)\s*$/;
+// aceita indentação (lista aninhada), marcador -/* e keyword sem case rígido
+const RE_GWT = /^\s*[-*]\s*\*\*(Dado|Quando|Então|Entao|E)\*\*\s*(.+?)\s*$/i;
 const RE_SECTION = /^##\s+(.+?)\s*$/;
+// IDs de 1-2 dígitos em headings: quase-IDs que a gramática não reconhece
+const RE_SHORT_ID = /^#{3,4}\s+((?:US|AC)-\d{1,2})\b/;
 
 export const SPEC_STATUSES = ['rascunho', 'pronta', 'em-implementacao', 'implementada', 'auditada'];
 export const ASM_STATUSES = ['aberta', 'confirmada', 'invalidada'];
@@ -37,6 +40,7 @@ export function parseSpec(content, { file = 'spec.md' } = {}) {
     assumptions: [],
     questions: [],
     parseIssues: [],
+    sections: { suposicoes: false, perguntas: false },
   };
 
   let currentStory = null;
@@ -66,13 +70,26 @@ export function parseSpec(content, { file = 'spec.md' } = {}) {
     const section = line.match(RE_SECTION);
     if (section) {
       const norm = normalizeSection(section[1]);
-      if (norm.startsWith('suposic')) currentSection = 'suposicoes';
-      else if (norm.startsWith('perguntas')) currentSection = 'perguntas';
-      else currentSection = norm;
+      if (norm.startsWith('suposic')) {
+        currentSection = 'suposicoes';
+        spec.sections.suposicoes = true;
+      } else if (norm.startsWith('perguntas')) {
+        currentSection = 'perguntas';
+        spec.sections.perguntas = true;
+      } else currentSection = norm;
       currentStory = null;
       currentAc = null;
       inTableHeader = false;
       continue;
+    }
+
+    const shortId = line.match(RE_SHORT_ID);
+    if (shortId) {
+      spec.parseIssues.push({
+        code: 'ID_CURTO',
+        line: lineNo,
+        message: `"${shortId[1]}" tem menos de 3 dígitos e não é reconhecido — use ${shortId[1].replace(/\d+$/, (d) => d.padStart(3, '0'))}`,
+      });
     }
 
     const story = line.match(RE_STORY);
@@ -114,12 +131,12 @@ export function parseSpec(content, { file = 'spec.md' } = {}) {
 
     const gwt = line.match(RE_GWT);
     if (gwt && currentAc) {
-      const kind = gwt[1];
+      const kind = gwt[1].toLowerCase();
       const text = gwt[2];
-      if (kind === 'Dado') currentAc.given.push(text);
-      else if (kind === 'Quando') currentAc.when.push(text);
-      else if (kind === 'Então' || kind === 'Entao') currentAc.then.push(text);
-      else if (kind === 'E') {
+      if (kind === 'dado') currentAc.given.push(text);
+      else if (kind === 'quando') currentAc.when.push(text);
+      else if (kind === 'então' || kind === 'entao') currentAc.then.push(text);
+      else if (kind === 'e') {
         // "E" continua a última cláusula preenchida
         if (currentAc.then.length) currentAc.then.push(text);
         else if (currentAc.when.length) currentAc.when.push(text);

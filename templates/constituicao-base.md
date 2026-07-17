@@ -1,10 +1,11 @@
-# Constituição — v1.0.0
+# Constituição — v1.1.0
 
 <!--
   Princípios inegociáveis do projeto. Não são estilo: são restrições.
   Níveis: [DEVE] obrigatório · [RECOMENDADO] forte · [PODE] permitido/explícito.
   Todo [DEVE] precisa de verificação executável — senão o audit acusa
   PRINCIPIO_SEM_VERIFICACAO. Formatos:
+    - verificação(gate): satisfeita pelo próprio audit (só p/ princípios "meta")
     - verificação(teste): @principle:P-xxx
     - verificação(proibido): `regex` em `glob`
     - verificação(obrigatório): `regex` em `glob`
@@ -12,9 +13,11 @@
 
 ## P-001 [DEVE] Todo requisito tem prova executável
 
-Nenhuma feature é declarada pronta sem `onp-spec audit --ci` limpo.
+Nenhuma feature é declarada pronta sem o audit em modo CI sair limpo (exit 0).
+Este princípio é verificado pelo próprio mecanismo do audit (AC_SEM_TESTE,
+AC_SEM_PROVA, TASK_CONCLUIDA_SEM_PROVA) — não precisa de teste extra seu.
 
-- verificação(teste): @principle:P-001
+- verificação(gate): intrínseca ao audit
 
 ## P-002 [RECOMENDADO] Segredos nunca em código
 

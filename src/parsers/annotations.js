@@ -8,6 +8,7 @@
 // todas as ocorrências com arquivo + linha.
 
 import { readdirSync, readFileSync, statSync } from 'fs';
+import { spawnSync } from 'child_process';
 import path from 'path';
 import { globToRegExp, anyGlobMatch } from '../util/text.js';
 
@@ -78,28 +79,66 @@ export function scanAnnotations(rootDir, files) {
 
 // Procura ocorrências de um padrão regex em arquivos que casam um glob.
 // Usado pelas verificações (proibido/obrigatório) da constituição.
-export function grepPattern(rootDir, pattern, glob, ignoreGlobs) {
-  const files = walkFiles(rootDir, { includeGlobs: [glob], ignoreGlobs });
+//
+// Roda em SUBPROCESSO com timeout: uma regex patológica vinda da constituição
+// (ex.: `(a+)+$`) causaria catastrophic backtracking e travaria o gate para
+// sempre — aqui ela é morta e vira um achado, não um DoS.
+const GREP_TIMEOUT_MS = 5000;
+
+const GREP_WORKER = `
+let input = '';
+process.stdin.on('data', (d) => (input += d));
+process.stdin.on('end', () => {
+  const { rootDir, pattern, files } = JSON.parse(input);
+  const { readFileSync } = require('fs');
+  const path = require('path');
   let re;
-  try {
-    re = new RegExp(pattern);
-  } catch (err) {
-    return { error: `regex inválida: ${pattern} (${err.message})`, hits: [], files };
+  try { re = new RegExp(pattern); } catch (err) {
+    console.log(JSON.stringify({ error: 'regex inválida: ' + pattern + ' (' + err.message + ')', hits: [] }));
+    return;
   }
   const hits = [];
   for (const rel of files) {
     let content;
-    try {
-      content = readFileSync(path.join(rootDir, rel), 'utf-8');
-    } catch {
-      continue;
-    }
-    const lines = content.split(/\r?\n/);
+    try { content = readFileSync(path.join(rootDir, rel), 'utf-8'); } catch { continue; }
+    const lines = content.split(/\\r?\\n/);
     for (let i = 0; i < lines.length; i++) {
-      if (re.test(lines[i])) {
-        hits.push({ file: rel, line: i + 1, text: lines[i].trim() });
-      }
+      if (re.test(lines[i])) hits.push({ file: rel, line: i + 1, text: lines[i].trim() });
     }
   }
-  return { error: null, hits, files };
+  console.log(JSON.stringify({ error: null, hits }));
+});
+`;
+
+export function grepPattern(rootDir, pattern, glob, ignoreGlobs) {
+  const files = walkFiles(rootDir, { includeGlobs: [glob], ignoreGlobs });
+  // regex inválida é acusada SEMPRE, mesmo com glob vazio (compilar é barato
+  // e seguro; só a execução pode ser patológica)
+  try {
+    new RegExp(pattern);
+  } catch (err) {
+    return { error: `regex inválida: ${pattern} (${err.message})`, hits: [], files };
+  }
+  if (files.length === 0) return { error: null, hits: [], files };
+
+  const proc = spawnSync(process.execPath, ['-e', GREP_WORKER], {
+    input: JSON.stringify({ rootDir, pattern, files }),
+    encoding: 'utf-8',
+    timeout: GREP_TIMEOUT_MS,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+
+  if (proc.signal || proc.status === null) {
+    return {
+      error: `regex \`${pattern}\` excedeu ${GREP_TIMEOUT_MS / 1000}s (possível catastrophic backtracking) — simplifique o padrão`,
+      hits: [],
+      files,
+    };
+  }
+  try {
+    const out = JSON.parse(proc.stdout);
+    return { error: out.error, hits: out.hits, files };
+  } catch {
+    return { error: `falha ao executar a verificação regex \`${pattern}\``, hits: [], files };
+  }
 }
