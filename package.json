@@ -1,5 +1,5 @@
 {
-  "name": "onp-spec-driven",
+  "name": "onp-spec",
   "version": "0.1.0",
   "description": "Spec-anchored development: specs auditáveis contra o código, DoD executável, suposições explícitas e constituição verificável. Zero dependências.",
   "type": "module",
@@ -12,7 +12,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
-    "bench": "node benchmark/run.js"
+    "bench": "node benchmark/run.js",
+    "prepublishOnly": "npm test"
   },
   "files": [
     "bin/",
