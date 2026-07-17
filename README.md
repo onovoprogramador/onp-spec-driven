@@ -15,7 +15,7 @@ Zero dependências. Instale com `npm i -g @onovoprogramador/onp-spec` e use o co
 
 ## O problema que toda ferramenta de SDD tem
 
-Spec Kit, Kiro, OpenSpec, TLC — todas são **spec-first**: a spec dá clareza,
+Spec Kit, Kiro, OpenSpec — todas são **spec-first**: a spec dá clareza,
 gera o código, o código evolui e a spec vira ficção. Você fica com uma
 documentação que *parece* verdadeira e não é — falsa confiança no comportamento
 "documentado".
@@ -80,7 +80,6 @@ Specs reais do domínio, com defeitos que de fato adoecem projetos SDD. Mede-se 
 | **onp-spec-driven** | **100%** (9/9) | ✅ baseline limpo |
 | OpenSpec | 11% (1/9) | só requisito incompleto |
 | spec-kit | 0% mecânico | scaffolding; testes opcionais |
-| TLC Spec-Driven | 0% mecânico | Verifier é sub-agente LLM |
 
 Detalhes e matriz completa: [benchmark/RESULTS.md](benchmark/RESULTS.md).
 
