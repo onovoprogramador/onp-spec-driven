@@ -4,7 +4,7 @@
 especificação é auditada mecanicamente contra o código — em CI, o tempo todo —
 em vez de virar mentira assim que o código evolui.
 
-Zero dependências. Um comando: `npx onp-spec`.
+Zero dependências. Instale com `npm i -g @onovoprogramador/onp-spec` e use o comando `onp-spec`.
 
 ```
 ┌────────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐
@@ -87,16 +87,21 @@ Detalhes e matriz completa: [benchmark/RESULTS.md](benchmark/RESULTS.md).
 ## Início rápido
 
 ```bash
+# instale uma vez (global) — ou use como dev dependency no projeto
+npm install -g @onovoprogramador/onp-spec
+
 # no seu projeto
-npx onp-spec init --preset lgpd-educacao
-npx onp-spec new entrega-dever-casa
+onp-spec init --preset lgpd-educacao
+onp-spec new entrega-dever-casa
 
 # escreva US/AC (Dado/Quando/Então) e registre Suposições/Perguntas, então:
-npx onp-spec scaffold entrega-dever-casa   # DoD vira teste que FALHA
+onp-spec scaffold entrega-dever-casa   # DoD vira teste que FALHA
 # ...implemente até passar...
-npx onp-spec verify entrega-dever-casa     # o runner grava a prova
-npx onp-spec audit --ci                    # exit 0 = alinhado
+onp-spec verify entrega-dever-casa     # o runner grava a prova
+onp-spec audit --ci                    # exit 0 = alinhado
 ```
+
+> Sem instalar (roda direto do npm): `npx @onovoprogramador/onp-spec init`.
 
 Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma).
 

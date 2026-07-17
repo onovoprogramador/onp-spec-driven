@@ -1,6 +1,9 @@
 {
-  "name": "onp-spec",
+  "name": "@onovoprogramador/onp-spec",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Spec-anchored development: specs auditáveis contra o código, DoD executável, suposições explícitas e constituição verificável. Zero dependências.",
   "type": "module",
   "bin": {
