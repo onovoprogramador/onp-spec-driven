@@ -1,0 +1,36 @@
+{
+  "name": "onp-spec-driven",
+  "version": "0.1.0",
+  "description": "Spec-anchored development: specs auditáveis contra o código, DoD executável, suposições explícitas e constituição verificável. Zero dependências.",
+  "type": "module",
+  "bin": {
+    "onp-spec": "bin/onp-spec.js"
+  },
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "bench": "node benchmark/run.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "templates/",
+    "skills/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "spec-driven",
+    "spec-anchored",
+    "sdd",
+    "rastreabilidade",
+    "lgpd",
+    "ai-coding",
+    "claude-code"
+  ],
+  "author": "Vitor Manoel — O Novo Programador",
+  "license": "MIT"
+}

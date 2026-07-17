@@ -1,0 +1,4 @@
+node_modules/
+benchmark/.vendor/
+*.log
+.DS_Store

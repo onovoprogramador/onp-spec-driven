@@ -1,0 +1,40 @@
+{
+  "feature": "inscricao-turma",
+  "timestamp": "2026-07-17T18:31:58.423Z",
+  "gitRev": null,
+  "command": "node --test",
+  "reporter": "tap",
+  "exitCode": 0,
+  "testsParsed": 6,
+  "results": {
+    "AC-001": {
+      "status": "pass",
+      "testName": "AC-001: inscrição em turma com vaga @spec:AC-001",
+      "method": "tap"
+    },
+    "AC-002": {
+      "status": "pass",
+      "testName": "AC-002: turma lotada recusa inscrição @spec:AC-002",
+      "method": "tap"
+    },
+    "AC-003": {
+      "status": "pass",
+      "testName": "AC-003: menor sem consentimento é bloqueado @spec:AC-003",
+      "method": "tap"
+    }
+  },
+  "principles": {
+    "P-001": {
+      "status": "pass",
+      "testName": "P-001 nota nunca exposta a outro aluno @principle:P-001"
+    },
+    "P-002": {
+      "status": "pass",
+      "testName": "P-002 acesso a nota é registrado @principle:P-002"
+    },
+    "P-003": {
+      "status": "pass",
+      "testName": "P-003 dados de menores só com base legal @principle:P-003"
+    }
+  }
+}
