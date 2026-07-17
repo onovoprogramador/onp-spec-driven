@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Prepara o benchmark clonando e compilando o OpenSpec (concorrente com
-# validador mecânico real) para rodar a comparação AO VIVO. spec-kit e TLC
-# entram pela matriz de capacidade (verificada no código-fonte — ver
-# benchmark/adapters/capability.js), então não precisam de build.
+# validador mecânico real) para rodar a comparação AO VIVO. O spec-kit
+# entra pela matriz de capacidade (verificada no código-fonte — ver
+# benchmark/adapters/capability.js), então não precisa de build.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

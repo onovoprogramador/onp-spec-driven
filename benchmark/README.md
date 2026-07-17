@@ -33,9 +33,8 @@ compilado em outro lugar: `OPENSPEC_BIN=/caminho/bin/openspec.js node benchmark/
 | onp-spec-driven | executada ao vivo (`onp-spec audit --ci`) | é a nossa |
 | OpenSpec | executada ao vivo (`openspec validate --strict`) | tem validador mecânico real |
 | spec-kit | matriz de capacidade | CLI só de scaffolding; sem validador de defeitos |
-| TLC Spec-Driven | matriz de capacidade | skill markdown; Verifier é sub-agente LLM |
 
-A classificação de spec-kit e TLC como "sem validador mecânico" está justificada
+A classificação do spec-kit como "sem validador mecânico" está justificada
 e é verificável no código-fonte — ver [adapters/capability.js](adapters/capability.js).
 
 ## Resultado atual
@@ -43,4 +42,4 @@ e é verificável no código-fonte — ver [adapters/capability.js](adapters/cap
 Ver [RESULTS.md](RESULTS.md) (regenerado a cada `node benchmark/run.js`).
 
 Resumo: **onp-spec-driven 100% (9/9)** com baseline limpo · OpenSpec 11% (1/9,
-só requisito incompleto) · spec-kit e TLC 0% mecânico.
+só requisito incompleto) · spec-kit 0% mecânico.

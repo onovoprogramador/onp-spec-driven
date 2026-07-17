@@ -1,8 +1,8 @@
 // Harness de benchmark — roda ao vivo o onp-spec-driven e o OpenSpec sobre a
 // MESMA feature real do domínio ONP, com defeitos semeados, e mede quantas
 // classes de defeito cada ferramenta detecta MECANICAMENTE (o que um CI pega
-// sem um humano/LLM no loop). spec-kit e TLC entram pela matriz de capacidade
-// (verificada no código-fonte: nenhum tem validador mecânico).
+// sem um humano/LLM no loop). O spec-kit entra pela matriz de capacidade
+// (verificada no código-fonte: não tem validador mecânico de defeitos).
 //
 // uso: OPENSPEC_BIN=/caminho/openspec/bin/openspec.js node benchmark/run.js
 
@@ -65,7 +65,6 @@ async function main() {
       onpspec: onpDet,
       openspec: osDet,
       speckit: scenario.defectClass === 'BASELINE_LIMPO' ? true : STATIC_TOOLS['spec-kit'].detects(),
-      tlc: scenario.defectClass === 'BASELINE_LIMPO' ? true : STATIC_TOOLS['tlc'].detects(),
       onpCodes: onp.detectedCodes,
       osOut: osRes.available ? osRes.out?.split('\n').slice(-3).join(' ') : osRes.note,
     });
@@ -75,12 +74,11 @@ async function main() {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
   // ---------- agrega ----------
-  const tools = ['onpspec', 'openspec', 'speckit', 'tlc'];
+  const tools = ['onpspec', 'openspec', 'speckit'];
   const labels = {
     onpspec: 'onp-spec-driven',
     openspec: 'OpenSpec',
     speckit: 'spec-kit',
-    tlc: 'TLC Spec-Driven',
   };
   // conta apenas cenários de DEFEITO (exclui baseline) para taxa de detecção
   const defectRows = rows.filter((r) => r.defectClass !== 'BASELINE_LIMPO');
@@ -146,10 +144,10 @@ function renderResults({ rows, score, tools, labels, defectRows, baseline, elaps
   l.push('');
 
   l.push('## Matriz por classe de defeito', '');
-  l.push('| Cenário | Defeito | onp-spec | OpenSpec | spec-kit | TLC |');
-  l.push('|---|---|:--:|:--:|:--:|:--:|');
+  l.push('| Cenário | Defeito | onp-spec | OpenSpec | spec-kit |');
+  l.push('|---|---|:--:|:--:|:--:|');
   for (const r of rows) {
-    l.push(`| ${r.scenario} | ${r.defectClass} | ${mark(r.onpspec)} | ${mark(r.openspec)} | ${mark(r.speckit)} | ${mark(r.tlc)} |`);
+    l.push(`| ${r.scenario} | ${r.defectClass} | ${mark(r.onpspec)} | ${mark(r.openspec)} | ${mark(r.speckit)} |`);
   }
   l.push('');
   l.push('Legenda: ✅ detectou (ou, no baseline, validou limpo) · ❌ não detectou · — não disponível.', '');
@@ -169,7 +167,6 @@ function renderResults({ rows, score, tools, labels, defectRows, baseline, elaps
   l.push('## Por que os concorrentes ficam para trás', '');
   l.push('- **OpenSpec** tem um validador estrutural real (exige frase normativa SHALL e ao menos um cenário por requisito), então pega `REQ_INCOMPLETO`. Mas seu modelo não conhece **testes, provas, suposições, privacidade ou código órfão** — logo não há como detectar o drift #1 (requisito sem teste), a vitória prematura, a suposição silenciosa ou a violação de privacidade.');
   l.push('- **spec-kit** é scaffolding: gera templates ótimos e conduz o agente, mas não roda nenhuma checagem de defeitos — e no template dele os **testes são opcionais**. Detecção mecânica: zero.');
-  l.push('- **TLC Spec-Driven** é disciplina de agente em markdown, com um Verifier que é um sub-agente LLM. Excelente como método, mas **nada roda em CI** de forma determinística — a garantia depende do modelo obedecer.');
   l.push('');
   l.push('O onp-spec-driven é o único que trata **prova de teste, suposição e princípio como dados de primeira classe** e os audita mecanicamente — por isso detecta as classes que os outros nem representam.', '');
 

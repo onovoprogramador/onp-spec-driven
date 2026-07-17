@@ -1,6 +1,6 @@
 # Resultados do benchmark — onp-spec-driven vs. concorrentes
 
-> Gerado por `node benchmark/run.js` · 2026-07-17 · 3.0s
+> Gerado por `node benchmark/run.js` · 2026-07-17 · 2.8s
 > OpenSpec: executado ao vivo
 
 ## O que se mede
@@ -14,22 +14,21 @@ Cada cenário parte de uma **spec real do domínio ONP** (inscrição de turma, 
 | onp-spec-driven | **100%** | 9/9 |
 | OpenSpec | **11%** | 1/9 |
 | spec-kit | **0%** | 0/9 |
-| TLC Spec-Driven | **0%** | 0/9 |
 
 ## Matriz por classe de defeito
 
-| Cenário | Defeito | onp-spec | OpenSpec | spec-kit | TLC |
-|---|---|:--:|:--:|:--:|:--:|
-| S00-baseline | BASELINE_LIMPO | ✅ | ✅ | ✅ | ✅ |
-| S01-req-sem-teste | REQ_SEM_TESTE | ✅ | ❌ | ❌ | ❌ |
-| S02-teste-orfao | TESTE_ORFAO | ✅ | ❌ | ❌ | ❌ |
-| S03-req-incompleto | REQ_INCOMPLETO | ✅ | ✅ | ❌ | ❌ |
-| S04-pronto-prematuro | PRONTO_PREMATURO | ✅ | ❌ | ❌ | ❌ |
-| S05-suposicao-silenciosa | SUPOSICAO_SILENCIOSA | ✅ | ❌ | ❌ | ❌ |
-| S06-privacidade-violada | PRIVACIDADE_VIOLADA | ✅ | ❌ | ❌ | ❌ |
-| S07-codigo-orfao | CODIGO_ORFAO | ✅ | ❌ | ❌ | ❌ |
-| S08-ref-quebrada | REF_QUEBRADA | ✅ | ❌ | ❌ | ❌ |
-| S09-id-duplicado | ID_DUPLICADO | ✅ | ❌ | ❌ | ❌ |
+| Cenário | Defeito | onp-spec | OpenSpec | spec-kit |
+|---|---|:--:|:--:|:--:|
+| S00-baseline | BASELINE_LIMPO | ✅ | ✅ | ✅ |
+| S01-req-sem-teste | REQ_SEM_TESTE | ✅ | ❌ | ❌ |
+| S02-teste-orfao | TESTE_ORFAO | ✅ | ❌ | ❌ |
+| S03-req-incompleto | REQ_INCOMPLETO | ✅ | ✅ | ❌ |
+| S04-pronto-prematuro | PRONTO_PREMATURO | ✅ | ❌ | ❌ |
+| S05-suposicao-silenciosa | SUPOSICAO_SILENCIOSA | ✅ | ❌ | ❌ |
+| S06-privacidade-violada | PRIVACIDADE_VIOLADA | ✅ | ❌ | ❌ |
+| S07-codigo-orfao | CODIGO_ORFAO | ✅ | ❌ | ❌ |
+| S08-ref-quebrada | REF_QUEBRADA | ✅ | ❌ | ❌ |
+| S09-id-duplicado | ID_DUPLICADO | ✅ | ❌ | ❌ |
 
 Legenda: ✅ detectou (ou, no baseline, validou limpo) · ❌ não detectou · — não disponível.
 
@@ -65,6 +64,5 @@ Legenda: ✅ detectou (ou, no baseline, validou limpo) · ❌ não detectou · �
 
 - **OpenSpec** tem um validador estrutural real (exige frase normativa SHALL e ao menos um cenário por requisito), então pega `REQ_INCOMPLETO`. Mas seu modelo não conhece **testes, provas, suposições, privacidade ou código órfão** — logo não há como detectar o drift #1 (requisito sem teste), a vitória prematura, a suposição silenciosa ou a violação de privacidade.
 - **spec-kit** é scaffolding: gera templates ótimos e conduz o agente, mas não roda nenhuma checagem de defeitos — e no template dele os **testes são opcionais**. Detecção mecânica: zero.
-- **TLC Spec-Driven** é disciplina de agente em markdown, com um Verifier que é um sub-agente LLM. Excelente como método, mas **nada roda em CI** de forma determinística — a garantia depende do modelo obedecer.
 
 O onp-spec-driven é o único que trata **prova de teste, suposição e princípio como dados de primeira classe** e os audita mecanicamente — por isso detecta as classes que os outros nem representam.

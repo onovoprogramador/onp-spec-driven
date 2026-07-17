@@ -12,7 +12,6 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 |---|---|---|
 | spec-kit (GitHub) | Templates ricos (US priorizadas, given-when-then, FR-xxx), CLI de scaffolding em Python | Testes são OPCIONAIS no template; nenhuma verificação mecânica; constituição é só prompt |
 | OpenSpec | Validador estrutural real (zod + parser md): SHALL/MUST presente, cenários existem, deltas bem-formados | Nunca liga requisito → teste → código; não detecta drift |
-| TLC Spec Driven v3.1 | Disciplina de agente: Verifier independente (author ≠ verifier), evidence-or-zero, lessons | Zero ferramenta mecânica; tudo depende do agente obedecer; nada roda em CI |
 
 ## Os 4 diferenciais (critérios de aceite do produto)
 
@@ -139,7 +138,7 @@ Verify roda o comando, extrai resultado POR TESTE, casa títulos com `@spec:AC-x
 ## Benchmark (pasta benchmark/)
 
 Specs reais do domínio ONP (inscrição de turma, entrega de dever, notas de alunos).
-Para cada ferramenta (spec-kit, OpenSpec, TLC=artefatos md, onp-spec-driven), o harness:
+Para cada ferramenta (spec-kit, OpenSpec, onp-spec-driven), o harness:
 1. Materializa a MESMA spec real no formato da ferramenta.
 2. Semeia defeitos reais (remove teste, requisito sem cobertura, suposição silenciosa, violação de privacidade, drift de ID).
 3. Roda o validador nativo da ferramenta e conta quantos defeitos ela detecta mecanicamente.
