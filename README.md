@@ -124,11 +124,18 @@ Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma
 `ID_DUPLICADO`, `VERIFY_OBSOLETO`. Descrição de cada um em
 [ARQUITETURA.md](ARQUITETURA.md).
 
-## Para agentes de IA (Claude Code, Cursor)
+## Para agentes de IA (Claude Code, Cursor) — o caminho principal
 
-`onp-spec init --agents claude` instala uma skill em `.claude/skills/` que dirige
-o agente pelo fluxo e o obriga a fechar com `onp-spec audit --ci` limpo. A prova
-não é a palavra do agente — é o exit code.
+A skill em `skills/onp-spec-driven/` é **autossuficiente**: carrega o motor
+mecânico embarcado (`scripts/onp-spec.mjs`, zero dependências) e a instalação
+inteira é copiar a pasta para `.claude/skills/` do projeto — sem npm, sem npx.
+Ela dirige o agente pelo fluxo e o obriga a fechar com o audit em modo CI
+limpo. A prova não é a palavra do agente — é o exit code (e teste pulado não
+conta como prova).
+
+Quem já usa a CLI: `onp-spec init --agents claude` também instala a skill.
+O motor embarcado é gerado de `src/` por `node tools/build-skill.mjs` (o teste
+`skill-sync` acusa divergência).
 
 ## Requisitos
 

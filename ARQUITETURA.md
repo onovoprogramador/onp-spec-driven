@@ -29,12 +29,19 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 
 ## Stack
 
-- Node.js >= 18, ESM puro, **zero dependências** (vantagem sobre OpenSpec/spec-kit: `npx onp-spec` e pronto).
+- Node.js >= 18, ESM puro, **zero dependências**.
 - Testes da própria lib: `node:test` nativo.
-- Duas camadas:
-  - **CLI mecânica** (`bin/onp-spec.js` → `src/`): parse, audit, verify, scaffold, init, new, status.
-  - **Camada de agente** (`skills/onp-spec-driven/`): SKILL.md que dirige Claude Code/Cursor pelo fluxo
-    Especificar → Projetar → Tarefas → Executar → **Auditar** (o agente é obrigado a fechar com audit exit 0).
+- **A skill é o artefato principal** (`skills/onp-spec-driven/`), autossuficiente:
+  - `SKILL.md` + `references/` — contrato do agente (Claude Code/Cursor): fluxo
+    Especificar → Projetar → Tarefas → Executar → **Auditar**, loop de correção
+    limitado a 3 iterações, 1 task = 1 commit, gate com saída colada.
+  - `scripts/` — **motor mecânico embarcado** (gerado de `src/` por
+    `node tools/build-skill.mjs`; `test/skill-sync.test.js` acusa drift).
+    Instalar = copiar a pasta para `.claude/skills/`. Sem npm, sem npx.
+- A **CLI npm** (`bin/onp-spec.js` → `src/`) continua existindo como modo CI
+  (`@onovoprogramador/onp-spec`); consome o MESMO `src/`.
+- Design da refatoração skill-first: `docs/TDD-skill-harness.md`; achados que a
+  motivaram: `docs/ACHADOS-teste-exaustivo.md`.
 
 ## Formato dos artefatos (.spec/)
 
@@ -114,20 +121,35 @@ Todo endpoint que retorna nota filtra pelo aluno autenticado.
 | Código | Achado | Severidade |
 |---|---|---|
 | AC_SEM_TESTE | AC sem nenhum teste anotado | ERRO |
-| AC_SEM_PROVA | Teste existe mas nunca passou em verify (ou verify obsoleto) | ERRO em --ci, AVISO fora |
+| AC_SEM_PROVA | Teste existe mas nunca passou em verify (falhou, foi PULADO — skip não é prova — ou verify obsoleto) | ERRO em --ci, AVISO fora |
 | TESTE_ORFAO | Teste anotado com AC inexistente (drift!) | ERRO |
-| REF_QUEBRADA | Task referencia US/AC inexistente | ERRO |
+| REF_QUEBRADA | Task referencia US/AC inexistente em QUALQUER spec (IDs/refs são globais) | ERRO |
 | US_SEM_AC | História sem critério de aceite | ERRO |
 | AC_INCOMPLETO | AC sem Dado/Quando/Então completos | ERRO |
-| AC_SEM_TASK | Nenhuma task cobre o AC | AVISO |
+| AC_SEM_TASK | Nenhuma task (de qualquer feature) cobre o AC | AVISO |
 | ARQUIVO_ORFAO | Arquivo de src não mapeado por nenhuma task (globs configuráveis) | AVISO |
+| ARQUIVO_INEXISTENTE | Task mapeia arquivo que não existe | ERRO se [concluida], AVISO senão |
 | TASK_CONCLUIDA_SEM_PROVA | Task [concluida] com AC sem PASS | ERRO |
+| TASK_SEM_STATUS | Task sem status explícito (assume pendente) | AVISO |
+| TASK_STATUS_INVALIDO | Status de task fora de pendente/em-andamento/concluida (acentos/maiúsculas são normalizados antes) | ERRO |
 | ASM_ABERTA | Suposição aberta com feature implementada/auditada | ERRO |
 | Q_ABERTA | Pergunta aberta em implementação | AVISO |
+| SECAO_AUSENTE | Spec sem seção Suposições/Perguntas em aberto | ERRO com status ≥ pronta, AVISO em rascunho |
 | PRINCIPIO_SEM_VERIFICACAO | P [DEVE] sem verificação executável | ERRO |
 | PRINCIPIO_VIOLADO | Padrão proibido encontrado / tag de teste ausente | ERRO |
+| NIVEL_INVALIDO | Nível de princípio fora de DEVE/RECOMENDADO/PODE (tratado como DEVE, nunca ignorado) | ERRO |
+| GLOB_SEM_ARQUIVOS | Verificação da constituição com glob que não casa nenhum arquivo (inerte) | AVISO |
+| VERIFICACAO_MALFORMADA | Regex inválida, formato errado ou regex que excedeu o tempo limite (5s, subprocesso) | ERRO |
+| FEATURE_DIVERGENTE | `> feature:` difere do nome do diretório | AVISO |
+| PROVA_FRACA | Prova concedida só pelo exit code global (reporter exitcode) | AVISO |
 | ID_DUPLICADO | Dois elementos com o mesmo ID | ERRO |
+| ID_CURTO | ID com menos de 3 dígitos em heading (não reconhecido pela gramática) | AVISO |
 | VERIFY_OBSOLETO | Código alterado depois do último verify | AVISO |
+
+Regras de prova (verify): diretivas TAP `# SKIP`/`# TODO` e statuses JSON
+`skipped`/`pending`/`todo` viram veredito `skip` — nunca prova. Por tag:
+`fail` domina `pass`, que domina `skip`. Reporter `exitcode` só concede prova
+a AC com teste anotado, e sempre com o aviso PROVA_FRACA.
 
 ## verify — adaptadores de resultado de teste
 

@@ -1,6 +1,6 @@
 # Resultados do benchmark — onp-spec-driven vs. concorrentes
 
-> Gerado por `node benchmark/run.js` · 2026-07-17 · 2.8s
+> Gerado por `node benchmark/run.js` · 2026-07-17 · 3.1s
 > OpenSpec: executado ao vivo
 
 ## O que se mede
