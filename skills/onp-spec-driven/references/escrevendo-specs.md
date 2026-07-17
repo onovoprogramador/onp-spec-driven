@@ -13,8 +13,10 @@ precisa descrever algo que um teste consegue checar.
 
 ## Dado / Quando / Então — os três são obrigatórios
 
-O audit acusa `AC_INCOMPLETO` se faltar qualquer cláusula. Use `E` para
-continuar a última:
+O audit acusa `AC_INCOMPLETO` se faltar qualquer cláusula. O parser tolera
+indentação, marcador `-` ou `*` e maiúsculas/minúsculas no keyword (e arquivos
+salvos em NFD no macOS) — mas o formato canônico é `- **Dado** ...`. Use `E`
+para continuar a última:
 
 ```markdown
 #### AC-003 — Aviso de atraso
@@ -36,6 +38,11 @@ continuar a última:
 Regra dura: uma feature não vira `implementada`/`auditada` com ASM `aberta`. Isso
 força a conversa "olha, assumi X — é isso mesmo?" antes de considerar pronto.
 
+Regra mais dura ainda: a AUSÊNCIA das seções `## Suposições` e
+`## Perguntas em aberto` também é achado (`SECAO_AUSENTE` — erro com a spec
+madura). Não tem nenhuma? Escreva "Nenhuma." explicitamente — e desconfie:
+quase toda feature esconde uma suposição.
+
 ## IDs são globais e únicos
 
 `US-xxx`, `AC-xxx`, `ASM-xxx`, `Q-xxx`, `T-xxx`, `P-xxx` são únicos no projeto
@@ -53,3 +60,13 @@ rascunho → pronta → em-implementacao → implementada → auditada
 - `em-implementacao`: código em andamento. Qs abertas viram aviso.
 - `implementada`: código pronto. ASMs abertas viram **erro**.
 - `auditada`: `audit --ci` saiu 0 com prova de todos os ACs.
+
+## Tasks: formato dos campos
+
+- `Refs:` — IDs separados por vírgula/espaço. IDs são GLOBAIS: uma task pode
+  referenciar AC de outra feature.
+- `Arquivos:` — caminhos separados por VÍRGULA (espaços dentro do caminho são
+  válidos): `Arquivos: src/meu modulo.js, src/outro.js`.
+- Status: `[pendente]` / `[em-andamento]` / `[concluida]` — acentos e
+  maiúsculas tolerados (`[Concluída]` conta); token fora da lista é
+  `TASK_STATUS_INVALIDO` (erro), nunca ignorado em silêncio.

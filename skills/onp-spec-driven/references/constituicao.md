@@ -11,7 +11,15 @@ princípio [DEVE] tem uma **verificação executável** — senão o audit acusa
 - `[RECOMENDADO]` — forte. Verificação opcional. Violação = aviso.
 - `[PODE]` — permitido/explícito. Documenta uma escolha consciente.
 
-## Três formas de verificação
+## Quatro formas de verificação
+
+```markdown
+## P-001 [DEVE] Todo requisito tem prova executável
+- verificação(gate): intrínseca ao audit
+```
+→ satisfeita pelo próprio mecanismo do audit (AC_SEM_TESTE, AC_SEM_PROVA,
+TASK_CONCLUIDA_SEM_PROVA). Só para princípios "meta" sobre o processo — regras
+de domínio usam as formas abaixo.
 
 ```markdown
 ## P-001 [DEVE] Nota de aluno nunca exposta a outro aluno
@@ -48,7 +56,16 @@ que guardam dados de alunos (inclusive menores):
 - **P-008** portabilidade dos dados do aluno (pode)
 
 Ajuste os globs/regex à sua stack — eles rodam de verdade no audit, então
-precisam apontar pros seus arquivos.
+precisam apontar pros seus arquivos. Guard-rails do motor:
+
+- glob que não casa NENHUM arquivo → `GLOB_SEM_ARQUIVOS` (verificação inerte,
+  provável typo);
+- nível fora de [DEVE]/[RECOMENDADO]/[PODE] → `NIVEL_INVALIDO` (o princípio é
+  tratado como DEVE, nunca ignorado);
+- regex rodam em subprocesso com tempo limite (5s) — padrão patológico
+  (catastrophic backtracking) vira `VERIFICACAO_MALFORMADA`, não trava o gate;
+- o esqueleto dos testes de princípio (`verificação(teste)`) nasce no
+  `scaffold`, junto com os testes de AC.
 
 ## Rastreabilidade que dá diferencial de segurança
 

@@ -2,12 +2,15 @@
 
 ## Exemplo completo: "entrega de dever de casa"
 
+> `onp-spec <cmd>` abrevia `node <dir-desta-skill>/scripts/onp-spec.mjs <cmd>`,
+> sempre a partir da RAIZ do projeto (motor embarcado — nada a instalar).
+
 ```bash
 # 1. inicializa o projeto (uma vez)
-npx onp-spec init --preset lgpd-educacao
+onp-spec init --preset lgpd-educacao
 
 # 2. nova feature
-npx onp-spec new entrega-dever-casa
+onp-spec new entrega-dever-casa
 ```
 
 Edite `.spec/features/entrega-dever-casa/spec.md`:
@@ -51,18 +54,19 @@ Como aluno, quero enviar meu dever antes do prazo, para que conte como no prazo.
 
 ```bash
 # 3. DoD vira teste executável
-npx onp-spec scaffold entrega-dever-casa
-# → cria test/entrega-dever-casa.spec.test.js com 2 testes que FALHAM
+onp-spec scaffold entrega-dever-casa
+# → cria test/entrega-dever-casa.spec.test.js com testes que FALHAM
+#   (inclui esqueletos p/ princípios da constituição com verificação(teste))
 ```
 
 Agora implemente a lógica e preencha os testes. Rode:
 
 ```bash
-# 4. o runner prova (ou não)
-npx onp-spec verify entrega-dever-casa
+# 4. o runner prova (ou não) — teste PULADO não conta como prova
+onp-spec verify entrega-dever-casa
 
-# 5. o gate
-npx onp-spec audit --ci
+# 5. o gate — cole a saída; exit 0 ou não está pronto
+onp-spec audit --ci
 ```
 
 ## A tabela de status
@@ -83,14 +87,19 @@ ASM-001 aberta — o audit vai bloquear com `ASM_ABERTA`.
 
 No seu pipeline (GitHub Actions, GitLab CI):
 
+No CI você pode usar o mesmo motor embarcado (commitado junto com a skill) ou
+o pacote npm `@onovoprogramador/onp-spec` (modo CI):
+
 ```yaml
-- run: npx onp-spec verify entrega-dever-casa
-- run: npx onp-spec audit --ci      # falha o build se a spec e o código divergirem
+- run: node .claude/skills/onp-spec-driven/scripts/onp-spec.mjs verify entrega-dever-casa
+- run: node .claude/skills/onp-spec-driven/scripts/onp-spec.mjs audit --ci
 ```
 
 ## Por que isso mata o vibecoding
 
 O agente de IA não consegue dizer "implementei tudo" e passar batido: se um AC
 não tem teste, o audit acusa; se o teste nunca passou, o audit acusa; se o agente
-renomeou um requisito e esqueceu o teste, o audit acusa `TESTE_ORFAO`. A prova
+renomeou um requisito e esqueceu o teste, o audit acusa `TESTE_ORFAO`; se o
+agente PULOU o teste (skip/todo), o verify recusa a prova e o audit acusa
+`AC_SEM_PROVA`. A prova
 não é a palavra do agente — é o exit code.
