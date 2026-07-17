@@ -21,10 +21,23 @@ const TEXT_EXTENSIONS = new Set([
   '.md', '.txt', '.sql', '.sh', '.vue', '.svelte',
 ]);
 
+// Porção estática de um glob — tudo antes do primeiro `*`/`?`, cortada no
+// último `/`. 'src/**' -> 'src' | 'src/**/*.test.*' -> 'src' | '*.md' -> ''
+// | '../outro-repo/src/**' -> '../outro-repo/src'. É a partir daqui que o
+// walk físico começa — permite que o walk saia de baixo de rootDir quando o
+// glob usa `../` (globs não fazem I/O sozinhos: sem isso, nenhum arquivo
+// fora de rootDir seria visitado, e `../` nunca casaria com nada).
+function staticDirOf(glob) {
+  const wildcardIdx = glob.search(/[*?]/);
+  const prefix = wildcardIdx === -1 ? glob : glob.slice(0, wildcardIdx);
+  const lastSlash = prefix.lastIndexOf('/');
+  return lastSlash === -1 ? '' : prefix.slice(0, lastSlash);
+}
+
 export function walkFiles(rootDir, { includeGlobs, ignoreGlobs }) {
   const include = includeGlobs.map(globToRegExp);
   const ignore = ignoreGlobs.map(globToRegExp);
-  const found = [];
+  const found = new Set();
 
   function walk(dir) {
     let entries;
@@ -35,18 +48,22 @@ export function walkFiles(rootDir, { includeGlobs, ignoreGlobs }) {
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
+      // path.relative devolve o `../` de volta quando `full` cai fora de
+      // rootDir — é assim que um walk-root externo casa com um glob `../`.
       const rel = path.relative(rootDir, full).split(path.sep).join('/');
       if (anyGlobMatch(rel, ignore)) continue;
       if (entry.isDirectory()) {
         walk(full);
       } else if (entry.isFile()) {
-        if (anyGlobMatch(rel, include)) found.push(rel);
+        if (anyGlobMatch(rel, include)) found.add(rel);
       }
     }
   }
 
-  walk(rootDir);
-  return found.sort();
+  const walkRoots = new Set(includeGlobs.map((g) => path.resolve(rootDir, staticDirOf(g))));
+  for (const root of walkRoots) walk(root);
+
+  return [...found].sort();
 }
 
 export function scanAnnotations(rootDir, files) {
