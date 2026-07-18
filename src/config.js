@@ -3,6 +3,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
+import { LICOES_DEFAULTS } from './core/licoes.js';
 
 export const DEFAULT_CONFIG = {
   specDir: '.spec',
@@ -17,6 +18,8 @@ export const DEFAULT_CONFIG = {
   reporter: 'tap',
   // arquivo de saída para reporters json (vitest-json/jest-json)
   reporterOutputFile: null,
+  // camada de lições: limiares de promoção/quarentena, janela e tetos
+  licoes: { ...LICOES_DEFAULTS },
 };
 
 export function loadConfig(rootDir) {
@@ -30,5 +33,11 @@ export function loadConfig(rootDir) {
   } catch (err) {
     throw new Error(`onpspec.config.json inválido: ${err.message}`);
   }
-  return { ...DEFAULT_CONFIG, ...raw, rootDir, configPath };
+  return {
+    ...DEFAULT_CONFIG,
+    ...raw,
+    licoes: { ...DEFAULT_CONFIG.licoes, ...(raw.licoes || {}) },
+    rootDir,
+    configPath,
+  };
 }

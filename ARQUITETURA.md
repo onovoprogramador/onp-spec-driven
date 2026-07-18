@@ -13,7 +13,7 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 | spec-kit (GitHub) | Templates ricos (US priorizadas, given-when-then, FR-xxx), CLI de scaffolding em Python | Testes são OPCIONAIS no template; nenhuma verificação mecânica; constituição é só prompt |
 | OpenSpec | Validador estrutural real (zod + parser md): SHALL/MUST presente, cenários existem, deltas bem-formados | Nunca liga requisito → teste → código; não detecta drift |
 
-## Os 4 diferenciais (critérios de aceite do produto)
+## Os 5 diferenciais (critérios de aceite do produto)
 
 1. **Spec-anchored com rastreabilidade total**: US-xxx → AC-xxx → T-xxx → teste anotado.
    `onp-spec audit` responde mecanicamente: "qual AC não tem teste?", "que teste aponta pra AC inexistente?",
@@ -26,6 +26,9 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 4. **Constituição com níveis de obrigação verificáveis**: P-xxx com [DEVE]/[RECOMENDADO]/[PODE],
    cada DEVE com verificação executável (tag de teste `@principle:P-xxx`, padrão proibido/obrigatório via regex+glob).
    Preset LGPD/educação incluso (dados de menores, notas, auditoria de acesso).
+5. **Lições aprendidas com lastro mecânico**: a IA fraseia; o motor valida que a lição cita um
+   sinal REAL do histórico (achado de audit / falha de verify) e é dono de dedup, promoção por
+   recorrência entre features distintas, quarentena por penalidade, poda e renderização.
 
 ## Stack
 
@@ -48,7 +51,10 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 ```
 .spec/
 ├── constituicao.md          # P-xxx versionados com verificação executável
+├── licoes.json              # lições (estado canônico, escrito só pelo motor)
+├── LICOES.md                # lições renderizadas (leitura humana/agente)
 ├── verification/            # resultados de verify por feature (JSON, máquina)
+│   └── sinais.json          # histórico de sinais (lastro das lições)
 └── features/<nome>/
     ├── spec.md              # US-xxx, AC-xxx (Dado/Quando/Então), ASM-xxx, Q-xxx
     ├── tasks.md             # T-xxx com Refs: e Arquivos:
@@ -156,6 +162,40 @@ a AC com teste anotado, e sempre com o aviso PROVA_FRACA.
 `onpspec.config.json` → `{ "testCommand": "...", "reporter": "tap" | "vitest-json" | "jest-json" | "exitcode" }`.
 Verify roda o comando, extrai resultado POR TESTE, casa títulos com `@spec:AC-xxx` e grava
 `.spec/verification/<feature>.json` com {ac, status, teste, timestamp, gitRev}. Audit consome isso.
+
+## Camada de lições (src/core/sinais.js + src/core/licoes.js)
+
+O agente entra com o julgamento (frasear a regra geral); o motor é dono de
+tudo mecânico. Dois arquivos, ambos escritos só pelo motor:
+
+- `.spec/verification/sinais.json` — **histórico de sinais**: todo achado de
+  `audit` e toda falha/skip de `verify` (VERIFY_FALHOU/VERIFY_PULADO) vira uma
+  entrada chaveada por `(codigo, feature, ref)` com contagem de ocorrências.
+  Chaveado, não append-only: cresce com pontos de falha distintos, não com
+  execuções. Compactação automática por janela (`janelaDias`, default 90) e
+  teto (`maxSinais`, default 20000, ficam os mais recentes).
+- `.spec/licoes.json` (+ `LICOES.md` renderizado) — as lições.
+
+Ciclo de vida de uma lição:
+
+| Transição | Quem decide | Regra |
+|---|---|---|
+| — → recusada | motor | `LICAO_SEM_LASTRO`: nenhum sinal `(sinal, feature, fonte)` no histórico; texto > 280 chars também é recusado |
+| — → candidata | motor | lastro válido; dedup exato-após-normalização (NFD sem acentos, minúsculas, sem pontuação) por `sinal::texto` |
+| candidata → confirmada | motor | recorrência em `limiarPromocao` (default 2) features DISTINTAS — só confirmadas entram no guia |
+| confirmada → quarentena | motor | `limiarQuarentena` (default 2) penalidades via `licoes penalizar` |
+| candidata → podada | motor | estagnada além de `janelaDias` sem corroborar |
+
+`licoes sugerir` inverte o fluxo: agrupa o histórico por código de sinal e
+aponta os que recorreram em `limiarPromocao`+ features distintas com poucas
+lições associadas — o motor diz ONDE vale uma lição; a IA fraseia.
+
+Escala (validada em test/licoes-escala.test.js): listagem com teto fixo
+(`limiteListagem`, default 10 — custo de contexto não cresce com o repo),
+escopo hierárquico (`cobranca/boleto` casa filtro `cobranca`), evidências
+limitadas a 5 por lição. Limiares configuráveis em `onpspec.config.json`
+(chave `licoes`). O comando `licoes` não carrega o projeto — listar o guia é
+barato mesmo com centenas de features.
 
 ## Benchmark (pasta benchmark/)
 

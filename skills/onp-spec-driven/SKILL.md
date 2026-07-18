@@ -1,10 +1,10 @@
 ---
 name: onp-spec-driven
-description: Desenvolvimento spec-anchored — a spec continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Executar → Auditar, com rastreabilidade US→AC→Task→Teste, DoD executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, e constituição de princípios verificáveis (preset LGPD/educação). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "o que não tem teste". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
+description: Desenvolvimento spec-anchored — a spec continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Executar → Auditar → Aprender, com rastreabilidade US→AC→Task→Teste, DoD executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição de princípios verificáveis (preset LGPD/educação) e lições aprendidas com lastro mecânico (o motor recusa lição sem sinal real de audit/verify; promoção por recorrência entre features). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "o que não tem teste", "lições aprendidas". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 2.0.0
+  version: 2.1.0
 ---
 
 # onp-spec-driven — a spec que continua verdadeira
@@ -36,7 +36,8 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
-`audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions`.
+`audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
+`licoes <add|list|sugerir|penalizar|status>`.
 
 Abaixo, `onp-spec <comando>` é abreviação dessa invocação.
 
@@ -81,6 +82,9 @@ crie `tasks.md` — a fase foi pulada por engano.
 
 ### 1. Especificar
 
+- **Antes de escrever, carregue o guia aprendido**: `onp-spec licoes list`
+  (em projeto grande, filtre: `--escopo <dominio>`). São regras confirmadas
+  por falhas reais de features anteriores — aplique-as na spec.
 - `onp-spec new <feature>` cria `.spec/features/<feature>/spec.md` e `tasks.md`
   com IDs contínuos (únicos no projeto inteiro).
 - Escreva **histórias (US-xxx)** e, para cada uma, **critérios de aceite
@@ -123,6 +127,20 @@ uma ASM (você assumiu) ou uma Q (precisa do dono do produto).
 - Falhou? Corrija e re-audite — no máximo **3 iterações**; persistindo, pare e
   escale ao usuário com os achados ranqueados.
 - Fluxo completo com exemplo: [fluxo.md](references/fluxo.md).
+
+### 6. Aprender (fecha o ciclo)
+
+Depois que o audit sai 0: o caminho até aqui ficou registrado sozinho no
+histórico de sinais (todo achado de audit e toda falha/skip de verify).
+
+- `onp-spec licoes sugerir` — o motor aponta sinais que recorreram em
+  features distintas e ainda não têm lição.
+- Registre **no máximo 3 lições** com `onp-spec licoes add --sinal <CODIGO>
+  --feature <f> --fonte <AC-xxx> --texto "regra geral em uma frase"
+  [--escopo <dominio>]`. O motor RECUSA lição sem sinal real registrado
+  (`LICAO_SEM_LASTRO`) — se recusar, a lição não existe; não force.
+- **Caminho limpo → nenhuma lição.** Isso é correto, não é omissão.
+- Fraseado, promoção, penalização e escala: [licoes.md](references/licoes.md).
 
 ## Catálogo de achados do audit
 

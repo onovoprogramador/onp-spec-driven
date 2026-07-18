@@ -24,7 +24,7 @@ O ponto ideal é **spec-anchored**: spec e código evoluem juntos porque um test
 automatizado força o alinhamento. Quase nenhuma ferramenta entrega isso. Esta
 entrega.
 
-## Os 4 diferenciais
+## Os 5 diferenciais
 
 ### 1. Uma spec que você audita contra o código
 
@@ -69,6 +69,23 @@ onp-spec init --preset lgpd-educacao
 > P-001 [DEVE] Nota de um aluno nunca é exposta a outro aluno
 > P-002 [DEVE] Acesso a nota é registrado (trilha de auditoria)
 > P-004 [DEVE] Dados pessoais nunca em log — `verificação(proibido)` via grep
+
+### 5. Lições aprendidas com lastro mecânico
+
+O projeto melhora de feature em feature — sem virar log morto. Todo achado de
+audit e toda falha de verify vira um **sinal** registrado pelo motor; a IA
+fraseia a regra geral, mas `licoes add` **recusa** qualquer lição que não
+cite um sinal real (`LICAO_SEM_LASTRO`). Seletividade é mecânica: lição nasce
+`candidata`, só vira `confirmada` (e entra no guia) ao recorrer em **features
+distintas**; a que falha quando aplicada vai para quarentena; candidata
+estagnada é podada. A listagem tem teto fixo — funciona igual num repo com
+centenas de features e dezenas de domínios (`--escopo cobranca/boleto`).
+
+```bash
+onp-spec licoes sugerir   # o motor aponta ONDE vale uma lição (recorrência real)
+onp-spec licoes add ...   # com lastro; sem sinal registrado, é recusada
+onp-spec licoes list      # o guia carregado no início de cada feature
+```
 
 ## Resultado do benchmark
 
@@ -115,6 +132,7 @@ Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma
 | `audit [--ci] [--json] [--md]` | o gate: spec ↔ tasks ↔ testes ↔ código ↔ constituição |
 | `status` | painel de features, ACs provados, abertas |
 | `assumptions` | lista suposições e perguntas com status |
+| `licoes <add\|list\|sugerir\|penalizar\|status>` | lições com lastro: add exige sinal real; promoção por recorrência entre features |
 
 ## Catálogo de achados do audit
 

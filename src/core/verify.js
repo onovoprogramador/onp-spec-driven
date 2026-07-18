@@ -85,7 +85,7 @@ export function resultsByTag(tests) {
   return { acResults, principleResults };
 }
 
-function gitRev(rootDir) {
+export function gitRev(rootDir) {
   try {
     return execSync('git rev-parse --short HEAD', {
       cwd: rootDir,

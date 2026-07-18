@@ -7,9 +7,20 @@ import { loadConfig, DEFAULT_CONFIG } from './config.js';
 import { loadProject } from './core/project.js';
 import { auditProject } from './core/audit.js';
 import { renderTerminal, renderJson, renderMarkdown } from './core/report.js';
-import { runVerify } from './core/verify.js';
+import { runVerify, gitRev } from './core/verify.js';
 import { scaffoldTests } from './core/scaffold.js';
 import { allAcs } from './parsers/spec.js';
+import { carregarSinais, registrarAchados, registrarVerify } from './core/sinais.js';
+import {
+  carregarLicoes,
+  salvarLicoes,
+  adicionarLicao,
+  listarLicoes,
+  penalizarLicao,
+  podarLicoes,
+  sugerirLicoes,
+  LICOES_DEFAULTS,
+} from './core/licoes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
@@ -44,6 +55,10 @@ comandos:
                       gera esqueleto de teste (que falha) para cada AC sem teste
   status              painel: features, ACs provados, suposições/perguntas abertas
   assumptions         lista todas as suposições e perguntas com status
+  licoes <add|list|sugerir|penalizar|status>
+                      lições aprendidas COM LASTRO: só entra lição ancorada em
+                      sinal real do audit/verify; promoção mecânica ao recorrer
+                      em features distintas (detalhes: onp-spec licoes)
   help                esta ajuda
 
 fluxo típico:
@@ -246,6 +261,159 @@ function cmdAssumptions(project) {
   return 0;
 }
 
+const HELP_LICOES = `onp-spec licoes — lições aprendidas com lastro mecânico
+
+O agente entra com o julgamento (frasear a regra geral); o motor valida o
+lastro: uma lição só entra se cita um sinal REAL registrado por audit/verify
+em .spec/verification/sinais.json. Sem sinal, é opinião — recusada.
+
+subcomandos:
+  add --sinal <CODIGO> --feature <feature> --fonte <AC-xxx|arquivo>
+      --texto "regra geral em uma frase" [--escopo <dominio>]
+                     registra uma lição (candidata); ao recorrer em outra
+                     feature, o motor promove a confirmada
+  list [--status confirmada|candidata|quarentena|todas] [--escopo <dominio>]
+       [--query <termo>] [--limite N]
+                     lições para carregar no Especificar/Projetar
+                     (default: só confirmadas, no máximo ${LICOES_DEFAULTS.limiteListagem})
+  sugerir [--limite N]
+                     mineração mecânica: sinais recorrentes em features
+                     distintas que ainda não têm lição
+  penalizar --id L-xxx
+                     a lição foi aplicada e a falha recorreu; 2 penalidades
+                     movem para quarentena
+  status             contagens por status + caminhos dos arquivos`;
+
+function linhaLicao(l) {
+  const escopo = l.escopo ? ` · escopo ${l.escopo}` : '';
+  return `${l.id} [${l.status}] (${l.recorrencia} feature(s) · ${l.sinal}${escopo}) ${l.texto}`;
+}
+
+function cmdLicoes(config, positional, flags) {
+  const specRoot = path.join(config.rootDir, config.specDir);
+  if (!existsSync(specRoot)) {
+    console.error(`diretório ${config.specDir}/ não encontrado — rode \`onp-spec init\` primeiro`);
+    return 2;
+  }
+  const sub = positional[0];
+  const cfg = config.licoes;
+  const data = carregarLicoes(specRoot);
+
+  if (!sub || sub === 'help') {
+    console.log(HELP_LICOES);
+    return 0;
+  }
+
+  if (sub === 'add') {
+    const sinais = carregarSinais(specRoot);
+    const resultado = adicionarLicao(
+      data,
+      sinais,
+      {
+        texto: flags.texto,
+        sinal: flags.sinal,
+        feature: flags.feature,
+        fonte: flags.fonte,
+        escopo: flags.escopo,
+      },
+      cfg
+    );
+    if (resultado.erro) {
+      console.error(`erro: ${resultado.erro}`);
+      return 2;
+    }
+    const podadas = podarLicoes(data, cfg);
+    salvarLicoes(specRoot, data);
+    const { licao, evento } = resultado;
+    const rotulo = {
+      criada: `✔ ${licao.id} registrada como candidata (1 feature) — vira confirmada ao recorrer em ${cfg.limiarPromocao - 1} outra(s)`,
+      reforcada: `✔ ${licao.id} reforçada (${licao.recorrencia} feature(s): ${licao.features.join(', ')})`,
+      promovida: `★ ${licao.id} PROMOVIDA a confirmada (${licao.features.join(', ')}) — entra no guia de Especificar/Projetar`,
+    }[evento];
+    console.log(rotulo);
+    if (podadas.length) console.log(`· podadas por estagnação: ${podadas.join(', ')}`);
+    return 0;
+  }
+
+  if (sub === 'list') {
+    const licoes = listarLicoes(data, {
+      status: flags.status || 'confirmada',
+      escopo: typeof flags.escopo === 'string' ? flags.escopo : null,
+      query: typeof flags.query === 'string' ? flags.query : null,
+      limite: parseInt(flags.limite, 10) || cfg.limiteListagem,
+    });
+    if (!licoes.length) {
+      console.log(
+        flags.status && flags.status !== 'confirmada'
+          ? 'nenhuma lição com esse filtro'
+          : 'nenhuma lição confirmada ainda — candidatas viram confirmadas ao recorrer em features distintas (onp-spec licoes list --status todas)'
+      );
+      return 0;
+    }
+    for (const l of licoes) console.log(linhaLicao(l));
+    return 0;
+  }
+
+  if (sub === 'sugerir') {
+    const sinais = carregarSinais(specRoot);
+    const sugestoes = sugerirLicoes(data, sinais, cfg, {
+      limite: parseInt(flags.limite, 10) || 5,
+    });
+    if (!sugestoes.length) {
+      console.log(
+        `nenhum sinal recorrente em ${cfg.limiarPromocao}+ features distintas — nada digno de lição por ora (caminho limpo não gera lição; isso é correto)`
+      );
+      return 0;
+    }
+    console.log('sinais recorrentes — o motor aponta ONDE vale uma lição; o fraseado é seu:');
+    for (const s of sugestoes) {
+      console.log(
+        `  ${s.sinal} — ${s.features.length} feature(s) distintas · ${s.ocorrencias} ocorrência(s) · lições existentes: ${s.licoesExistentes}`
+      );
+      console.log(`    features: ${s.features.slice(0, 6).join(', ')}${s.features.length > 6 ? ` (+${s.features.length - 6})` : ''}`);
+      console.log(`    refs: ${s.refs.join(', ')}`);
+    }
+    console.log('\nregistre com: onp-spec licoes add --sinal <CODIGO> --feature <f> --fonte <ref> --texto "..."');
+    return 0;
+  }
+
+  if (sub === 'penalizar') {
+    if (typeof flags.id !== 'string') {
+      console.error('uso: onp-spec licoes penalizar --id L-xxx');
+      return 2;
+    }
+    const resultado = penalizarLicao(data, flags.id, cfg);
+    if (resultado.erro) {
+      console.error(`erro: ${resultado.erro}`);
+      return 2;
+    }
+    salvarLicoes(specRoot, data);
+    const { licao, evento } = resultado;
+    console.log(
+      evento === 'quarentenada'
+        ? `✘ ${licao.id} movida para QUARENTENA (${licao.penalidades} penalidades) — sai do guia; revisão é do usuário`
+        : `⚠ ${licao.id} penalizada (${licao.penalidades}/${cfg.limiarQuarentena}) — mais ${cfg.limiarQuarentena - licao.penalidades} move para quarentena`
+    );
+    return 0;
+  }
+
+  if (sub === 'status') {
+    const contagem = { confirmada: 0, candidata: 0, quarentena: 0 };
+    for (const l of data.licoes) contagem[l.status] = (contagem[l.status] || 0) + 1;
+    const sinais = carregarSinais(specRoot);
+    console.log(
+      `lições: ${contagem.confirmada} confirmada(s) · ${contagem.candidata} candidata(s) · ${contagem.quarentena} em quarentena`
+    );
+    console.log(`sinais no histórico: ${Object.keys(sinais.sinais).length} ponto(s) de falha distintos`);
+    console.log(`arquivos: ${config.specDir}/licoes.json (canônico) · ${config.specDir}/LICOES.md (leitura)`);
+    return 0;
+  }
+
+  console.error(`subcomando desconhecido: licoes ${sub}\n`);
+  console.log(HELP_LICOES);
+  return 2;
+}
+
 export async function run(argv) {
   const [command, ...rest] = argv;
   const { flags, positional } = parseFlags(rest);
@@ -271,6 +439,11 @@ export async function run(argv) {
   if (command === 'new') return cmdNew(rootDir, positional[0], flags);
 
   const config = loadConfig(rootDir);
+
+  // lições não precisam do projeto carregado — em repos grandes, listar o
+  // guia no início do Especificar tem que ser barato
+  if (command === 'licoes') return cmdLicoes(config, positional, flags);
+
   const project = loadProject(config);
 
   if (command === 'audit') {
@@ -285,6 +458,15 @@ export async function run(argv) {
       writeFileSync(path.join(rootDir, outPath), renderMarkdown(audit));
       console.log(`relatório salvo em ${outPath}`);
     }
+    const registrados = registrarAchados(project.specRoot, audit.findings, {
+      gitRev: gitRev(rootDir),
+      ...config.licoes,
+    });
+    if (registrados) {
+      console.log(
+        `${registrados} sinal(is) registrados no histórico — depois de corrigir: onp-spec licoes sugerir`
+      );
+    }
     return audit.exitCode;
   }
 
@@ -295,6 +477,7 @@ export async function run(argv) {
       return 2;
     }
     const { record, hint } = runVerify(project, featureName);
+    const sinaisFalha = registrarVerify(project.specRoot, record, config.licoes);
     const total = Object.keys(record.results).length;
     const passed = Object.values(record.results).filter((r) => r.status === 'pass').length;
     console.log(
@@ -311,6 +494,9 @@ export async function run(argv) {
       for (const [pId, r] of principles) {
         console.log(`  ${r.status === 'pass' ? '✔' : '✘'} ${pId} — ${r.testName}`);
       }
+    }
+    if (sinaisFalha) {
+      console.log(`  ${sinaisFalha} sinal(is) de falha/skip registrados no histórico`);
     }
     console.log(`prova gravada em .spec/verification/${featureName}.json — rode \`onp-spec audit\``);
     return passed === total && total > 0 ? 0 : 1;
