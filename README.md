@@ -39,20 +39,21 @@ onp-spec audit          # qual requisito NÃO tem teste? que teste não mapeia
 
 ### 2. Um "pronto" que a máquina verifica
 
-EARS deixa o requisito bonito, mas não o torna executável. Aqui, cada Definition
-of Done nasce como um teste (`Dado/Quando/Então` → código de teste com a tag
-`@spec:AC-xxx`). O agente **não consegue** declarar vitória prematura:
+EARS deixa o requisito bonito, mas não o torna executável. Aqui, cada
+definição de pronto nasce como um teste (`Dado/Quando/Então` → código de teste
+com a tag `@spec:AC-xxx`). O agente **não consegue** declarar vitória
+prematura:
 
 ```bash
 onp-spec verify entrega   # o test runner decide, não a sua palavra
-onp-spec audit --ci       # exit 1 se algum AC não tem prova PASS
+onp-spec audit --ci       # exit 1 se algum critério de aceite não tem prova PASS
 ```
 
 ### 3. Suposições e perguntas como cidadãs de primeira classe
 
 A crítica mais forte à SDD é empurrar você para uma spec "completa" e gerar falsa
-confiança. Aqui a IA é **obrigada** a registrar o que assumiu (`ASM-xxx`) e o que
-ficou em aberto (`Q-xxx`), com status. Uma feature não vira `implementada` com
+confiança. Aqui a IA é **obrigada** a registrar as suposições (o que assumiu,
+`ASM-xxx`) e as perguntas em aberto (`Q-xxx`), com status. Uma feature não vira `implementada` com
 suposição aberta — o audit bloqueia. Você aponta na tela: *"olha, ele assumiu que
 trabalho não pode ser reenviado — é isso que a gente quer?"*
 
@@ -110,8 +111,9 @@ npm install -g @onovoprogramador/onp-spec
 onp-spec init --preset lgpd-educacao
 onp-spec new entrega-dever-casa
 
-# escreva US/AC (Dado/Quando/Então) e registre Suposições/Perguntas, então:
-onp-spec scaffold entrega-dever-casa   # DoD vira teste que FALHA
+# escreva as histórias de usuário e os critérios de aceite (Dado/Quando/Então)
+# e registre Suposições/Perguntas, então:
+onp-spec scaffold entrega-dever-casa   # cada critério vira um teste que FALHA
 # ...implemente até passar...
 onp-spec verify entrega-dever-casa     # o runner grava a prova
 onp-spec audit --ci                    # exit 0 = alinhado
@@ -126,11 +128,11 @@ Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma
 | Comando | O que faz |
 |---|---|
 | `init [--preset base\|lgpd-educacao]` | cria `.spec/`, constituição e config |
-| `new <feature>` | cria `spec.md` e `tasks.md` com IDs contínuos |
-| `scaffold <feature>` | gera teste-esqueleto (que falha) para cada AC |
-| `verify <feature>` | roda os testes e grava a prova por AC |
-| `audit [--ci] [--json] [--md]` | o gate: spec ↔ tasks ↔ testes ↔ código ↔ constituição |
-| `status` | painel de features, ACs provados, abertas |
+| `new <feature>` | cria `spec.md` e `tasks.md` com códigos de rastreio contínuos |
+| `scaffold <feature>` | gera teste-esqueleto (que falha) para cada critério de aceite |
+| `verify <feature>` | roda os testes e grava a prova por critério de aceite |
+| `audit [--ci] [--json] [--md]` | o gate: especificação ↔ tarefas ↔ testes ↔ código ↔ constituição |
+| `status` | painel de features, critérios provados, suposições/perguntas abertas |
 | `assumptions` | lista suposições e perguntas com status |
 | `licoes <add\|list\|sugerir\|penalizar\|status>` | lições com lastro: add exige sinal real; promoção por recorrência entre features |
 

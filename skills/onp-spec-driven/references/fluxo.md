@@ -53,7 +53,7 @@ Como aluno, quero enviar meu dever antes do prazo, para que conte como no prazo.
 ```
 
 ```bash
-# 3. DoD vira teste executável
+# 3. cada critério de aceite vira um teste executável (a definição de pronto)
 onp-spec scaffold entrega-dever-casa
 # → cria test/entrega-dever-casa.spec.test.js com testes que FALHAM
 #   (inclui esqueletos p/ princípios da constituição com verificação(teste))
@@ -74,14 +74,15 @@ onp-spec audit --ci
 Rode `onp-spec status` a qualquer momento:
 
 ```
-feature                        status             ACs teste  prova  ASM?  Q?
-────────────────────────────────────────────────────────────────────────────
-entrega-dever-casa             em-implementacao     2     2      1     1   1
+feature                        status             critérios  com-teste  provados  suposições?  perguntas?
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+entrega-dever-casa             em-implementacao           2          2         1            1           1
 ```
 
-Lê-se: 2 ACs, ambos com teste anotado, mas só 1 provado até agora; 1 suposição e
-1 pergunta ainda abertas. A feature **não pode** ir para `implementada` com a
-ASM-001 aberta — o audit vai bloquear com `ASM_ABERTA`.
+Lê-se: 2 critérios de aceite, ambos com teste anotado, mas só 1 provado até
+agora; 1 suposição e 1 pergunta ainda abertas. A feature **não pode** ir para
+`implementada` com a suposição ASM-001 aberta — o audit vai bloquear com
+"suposição em aberto" (`ASM_ABERTA`).
 
 ## Integração com CI
 
@@ -97,9 +98,9 @@ o pacote npm `@onovoprogramador/onp-spec` (modo CI):
 
 ## Por que isso mata o vibecoding
 
-O agente de IA não consegue dizer "implementei tudo" e passar batido: se um AC
-não tem teste, o audit acusa; se o teste nunca passou, o audit acusa; se o agente
-renomeou um requisito e esqueceu o teste, o audit acusa `TESTE_ORFAO`; se o
-agente PULOU o teste (skip/todo), o verify recusa a prova e o audit acusa
-`AC_SEM_PROVA`. A prova
-não é a palavra do agente — é o exit code.
+O agente de IA não consegue dizer "implementei tudo" e passar batido: se um
+critério de aceite não tem teste, o audit acusa; se o teste nunca passou, o
+audit acusa; se o agente renomeou um requisito e esqueceu o teste, o audit
+acusa teste órfão (`TESTE_ORFAO`); se o agente PULOU o teste (skip/todo), o
+verify recusa a prova e o audit acusa critério sem prova (`AC_SEM_PROVA`). A
+prova não é a palavra do agente — é o exit code.

@@ -123,7 +123,7 @@ export function parseSpec(content, { file = 'spec.md' } = {}) {
         spec.parseIssues.push({
           code: 'AC_FORA_DE_US',
           line: lineNo,
-          message: `${ac[1]} definido fora de uma história (US)`,
+          message: `${ac[1]} definido fora de uma história de usuário (US)`,
         });
       }
       continue;

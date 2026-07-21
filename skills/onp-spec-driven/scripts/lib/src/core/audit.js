@@ -124,7 +124,7 @@ export function auditProject(project, { ci = false } = {}) {
 
     if (spec.stories.length === 0) {
       findings.push(
-        finding('SPEC_SEM_US', 'erro', `spec sem nenhuma história (US-xxx)`, {
+        finding('SPEC_SEM_US', 'erro', `especificação sem nenhuma história de usuário (US-xxx)`, {
           feature: name,
           file: spec.file,
         })
@@ -152,7 +152,7 @@ export function auditProject(project, { ci = false } = {}) {
         finding(
           'SECAO_AUSENTE',
           specMatured ? 'erro' : 'aviso',
-          `spec sem seção "## Suposições" — registre ASMs ou escreva "Nenhuma." explicitamente`,
+          `especificação sem seção "## Suposições" — registre as suposições ou escreva "Nenhuma." explicitamente`,
           { feature: name, file: spec.file }
         )
       );
@@ -162,7 +162,7 @@ export function auditProject(project, { ci = false } = {}) {
         finding(
           'SECAO_AUSENTE',
           specMatured ? 'erro' : 'aviso',
-          `spec sem seção "## Perguntas em aberto" — registre Qs ou escreva "Nenhuma." explicitamente`,
+          `especificação sem seção "## Perguntas em aberto" — registre as perguntas ou escreva "Nenhuma." explicitamente`,
           { feature: name, file: spec.file }
         )
       );
@@ -269,7 +269,7 @@ export function auditProject(project, { ci = false } = {}) {
               finding(
                 'REF_QUEBRADA',
                 'erro',
-                `${task.id} referencia ${ref}, que não existe em nenhuma spec`,
+                `a tarefa ${task.id} referencia ${ref}, que não existe em nenhuma especificação`,
                 { feature: name, file: tasks.file, line: task.line }
               )
             );
@@ -282,7 +282,7 @@ export function auditProject(project, { ci = false } = {}) {
               finding(
                 'ARQUIVO_INEXISTENTE',
                 task.status === 'concluida' ? 'erro' : 'aviso',
-                `${task.id} mapeia ${relFile}, que não existe${task.status === 'concluida' ? ' (task concluída!)' : ''}`,
+                `a tarefa ${task.id} mapeia ${relFile}, que não existe${task.status === 'concluida' ? ' (tarefa concluída!)' : ''}`,
                 { feature: name, file: tasks.file, line: task.line }
               )
             );
@@ -302,7 +302,7 @@ export function auditProject(project, { ci = false } = {}) {
                 finding(
                   'TASK_CONCLUIDA_SEM_PROVA',
                   'erro',
-                  `${task.id} está [concluida] mas ${acId} não tem prova PASS em verify${why}`,
+                  `a tarefa ${task.id} está [concluida] mas o critério ${acId} não tem prova PASS do verify${why}`,
                   { feature: name, file: tasks.file, line: task.line }
                 )
               );
@@ -314,7 +314,7 @@ export function auditProject(project, { ci = false } = {}) {
       for (const ac of allAcs(spec)) {
         if (!globalCoveredAcs.has(ac.id)) {
           findings.push(
-            finding('AC_SEM_TASK', 'aviso', `${ac.id} (${ac.title}) não é coberto por nenhuma task`, {
+            finding('AC_SEM_TASK', 'aviso', `${ac.id} (${ac.title}) não é coberto por nenhuma tarefa`, {
               feature: name,
               file: tasks.file,
             })
@@ -403,7 +403,7 @@ export function auditProject(project, { ci = false } = {}) {
         finding(
           'TESTE_ORFAO',
           'erro',
-          `teste anotado com @spec:${tag.acId}, mas esse AC não existe em nenhuma spec (drift: spec mudou e o teste ficou pra trás?)`,
+          `teste anotado com @spec:${tag.acId}, mas esse critério de aceite não existe em nenhuma especificação (a especificação mudou e o teste ficou pra trás?)`,
           { file: tag.file, line: tag.line }
         )
       );
@@ -426,7 +426,7 @@ export function auditProject(project, { ci = false } = {}) {
           finding(
             'ARQUIVO_ORFAO',
             'aviso',
-            `${src} não é mapeado por nenhuma task — que requisito esse código atende?`,
+            `${src} não é mapeado por nenhuma tarefa — que requisito esse código atende?`,
             { file: src }
           )
         );

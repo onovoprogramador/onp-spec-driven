@@ -2,9 +2,10 @@
 
 <!--
   Princípios inegociáveis do projeto. Não são estilo: são restrições.
+  P-xxx = princípio (código de rastreio, como US/AC/T).
   Níveis: [DEVE] obrigatório · [RECOMENDADO] forte · [PODE] permitido/explícito.
   Todo [DEVE] precisa de verificação executável — senão o audit acusa
-  PRINCIPIO_SEM_VERIFICACAO. Formatos:
+  "princípio sem verificação" (PRINCIPIO_SEM_VERIFICACAO). Formatos:
     - verificação(gate): satisfeita pelo próprio audit (só p/ princípios "meta")
     - verificação(teste): @principle:P-xxx
     - verificação(proibido): `regex` em `glob`

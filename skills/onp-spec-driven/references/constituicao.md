@@ -3,7 +3,7 @@
 A constituição (`.spec/constituicao.md`) codifica restrições **inegociáveis** do
 projeto. Não é estilo; é lei. E, diferente de outras ferramentas, aqui todo
 princípio [DEVE] tem uma **verificação executável** — senão o audit acusa
-`PRINCIPIO_SEM_VERIFICACAO`.
+"princípio sem verificação" (`PRINCIPIO_SEM_VERIFICACAO`).
 
 ## Níveis de obrigação
 
@@ -17,9 +17,9 @@ princípio [DEVE] tem uma **verificação executável** — senão o audit acusa
 ## P-001 [DEVE] Todo requisito tem prova executável
 - verificação(gate): intrínseca ao audit
 ```
-→ satisfeita pelo próprio mecanismo do audit (AC_SEM_TESTE, AC_SEM_PROVA,
-TASK_CONCLUIDA_SEM_PROVA). Só para princípios "meta" sobre o processo — regras
-de domínio usam as formas abaixo.
+→ satisfeita pelo próprio mecanismo do audit (critério sem teste, critério sem
+prova, tarefa concluída sem prova). Só para princípios "meta" sobre o processo
+— regras de domínio usam as formas abaixo.
 
 ```markdown
 ## P-001 [DEVE] Nota de aluno nunca exposta a outro aluno
@@ -58,14 +58,15 @@ que guardam dados de alunos (inclusive menores):
 Ajuste os globs/regex à sua stack — eles rodam de verdade no audit, então
 precisam apontar pros seus arquivos. Guard-rails do motor:
 
-- glob que não casa NENHUM arquivo → `GLOB_SEM_ARQUIVOS` (verificação inerte,
-  provável typo);
-- nível fora de [DEVE]/[RECOMENDADO]/[PODE] → `NIVEL_INVALIDO` (o princípio é
-  tratado como DEVE, nunca ignorado);
+- glob que não casa NENHUM arquivo → "verificação não olha nenhum arquivo"
+  (`GLOB_SEM_ARQUIVOS` — verificação inerte, provável typo);
+- nível fora de [DEVE]/[RECOMENDADO]/[PODE] → "nível de princípio inválido"
+  (`NIVEL_INVALIDO` — o princípio é tratado como DEVE, nunca ignorado);
 - regex rodam em subprocesso com tempo limite (5s) — padrão patológico
-  (catastrophic backtracking) vira `VERIFICACAO_MALFORMADA`, não trava o gate;
+  (catastrophic backtracking) vira "verificação malformada"
+  (`VERIFICACAO_MALFORMADA`), não trava o gate;
 - o esqueleto dos testes de princípio (`verificação(teste)`) nasce no
-  `scaffold`, junto com os testes de AC.
+  `scaffold`, junto com os testes dos critérios de aceite.
 
 ## Rastreabilidade que dá diferencial de segurança
 

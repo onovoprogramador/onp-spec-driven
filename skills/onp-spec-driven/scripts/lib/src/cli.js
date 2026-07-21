@@ -39,7 +39,7 @@ function resolveSkillDir() {
 }
 const SKILL_DIR = resolveSkillDir();
 
-const HELP = `onp-spec — spec-anchored development (a spec que continua verdadeira)
+const HELP = `onp-spec — spec-anchored development (a especificação que continua verdadeira)
 
 uso: onp-spec <comando> [opções]
 
@@ -48,12 +48,15 @@ comandos:
                       cria .spec/, constituição e config no diretório atual
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
   audit [--ci] [--json] [--md <arquivo>]
-                      audita spec ↔ tasks ↔ testes ↔ código ↔ constituição
+                      audita especificação ↔ tarefas ↔ testes ↔ código ↔ constituição
                       exit 1 se houver erro (use no CI)
-  verify <feature>    roda os testes e grava a prova por AC (quem decide é o runner)
+  verify <feature>    roda os testes e grava a prova de cada critério de aceite
+                      (quem decide é o test runner)
   scaffold <feature> [--force]
-                      gera esqueleto de teste (que falha) para cada AC sem teste
-  status              painel: features, ACs provados, suposições/perguntas abertas
+                      gera esqueleto de teste (que falha) para cada critério
+                      de aceite ainda sem teste
+  status              painel: features, critérios provados, suposições e
+                      perguntas abertas
   assumptions         lista todas as suposições e perguntas com status
   licoes <add|list|sugerir|penalizar|status>
                       lições aprendidas COM LASTRO: só entra lição ancorada em
@@ -63,11 +66,11 @@ comandos:
 
 fluxo típico:
   onp-spec init --preset lgpd-educacao
-  onp-spec new entrega-dever-casa     # escreva a spec (US/AC/ASM/Q)
-  onp-spec scaffold entrega-dever-casa # DoD vira teste que falha
+  onp-spec new entrega-dever-casa      # escreva histórias, critérios, suposições e perguntas
+  onp-spec scaffold entrega-dever-casa # cada critério vira um teste que falha
   ... implemente até os testes passarem ...
-  onp-spec verify entrega-dever-casa  # runner grava a prova
-  onp-spec audit --ci                 # 0 = spec e código alinhados`;
+  onp-spec verify entrega-dever-casa   # o test runner grava a prova
+  onp-spec audit --ci                  # 0 = especificação e código alinhados`;
 
 function parseFlags(args) {
   const flags = {};
@@ -203,8 +206,10 @@ function cmdNew(rootDir, name, flags) {
 
   console.log(`✔ .spec/features/${name}/spec.md`);
   console.log(`✔ .spec/features/${name}/tasks.md`);
-  console.log(`\npróximos passos:\n  1. escreva US/AC (Dado/Quando/Então) e PREENCHA Suposições e Perguntas`);
-  console.log(`  2. onp-spec scaffold ${name}   # DoD vira teste executável`);
+  console.log(`\npróximos passos:`);
+  console.log(`  1. escreva as histórias de usuário e os critérios de aceite (Dado/Quando/Então)`);
+  console.log(`     e PREENCHA as seções Suposições e Perguntas em aberto`);
+  console.log(`  2. onp-spec scaffold ${name}   # cada critério vira um teste executável`);
   console.log(`  3. onp-spec audit              # veja o que falta`);
   return 0;
 }
@@ -217,8 +222,11 @@ function cmdStatus(project) {
   const testFileSet = new Set(project.testFiles);
   const provenTags = project.annotations.specTags.filter((t) => testFileSet.has(t.file));
 
-  console.log('feature                        status             ACs teste  prova  ASM?  Q?');
-  console.log('─'.repeat(88));
+  const cols = ['critérios', 'com-teste', 'provados', 'suposições?', 'perguntas?'];
+  const header =
+    'feature'.padEnd(30) + ' ' + 'status'.padEnd(18) + cols.map((c) => ` ${c}`).join('');
+  console.log(header);
+  console.log('─'.repeat(header.length));
   for (const feature of project.features) {
     const spec = feature.spec;
     if (!spec) {
@@ -231,12 +239,16 @@ function cmdStatus(project) {
     const proven = acs.filter((ac) => v?.results?.[ac.id]?.status === 'pass').length;
     const asmOpen = spec.assumptions.filter((a) => a.status === 'aberta').length;
     const qOpen = spec.questions.filter((q) => q.status === 'aberta').length;
+    const vals = [acs.length, withTest, proven, asmOpen, qOpen];
     console.log(
-      `${feature.name.padEnd(30)} ${(spec.status || '—').padEnd(18)} ${String(acs.length).padStart(3)} ` +
-        `${String(withTest).padStart(5)} ${String(proven).padStart(6)} ${String(asmOpen).padStart(4)} ${String(qOpen).padStart(3)}`
+      `${feature.name.padEnd(30)} ${(spec.status || '—').padEnd(18)}` +
+        vals.map((v, i) => ` ${String(v).padStart(cols[i].length)}`).join('')
     );
   }
-  console.log('\nlegenda: teste = ACs com @spec:tag · prova = PASS no último verify · ASM?/Q? = abertas');
+  console.log(
+    '\nlegenda: critérios = critérios de aceite · com-teste = têm teste anotado (@spec:) ·' +
+      '\n         provados = PASS no último verify · suposições?/perguntas? = ainda abertas'
+  );
   return 0;
 }
 
@@ -481,7 +493,7 @@ export async function run(argv) {
     const total = Object.keys(record.results).length;
     const passed = Object.values(record.results).filter((r) => r.status === 'pass').length;
     console.log(
-      `verify ${featureName}: ${passed}/${total} AC(s) com prova PASS · ${record.testsParsed} teste(s) lidos · exit ${record.exitCode}`
+      `verify ${featureName}: ${passed}/${total} critério(s) de aceite com prova PASS · ${record.testsParsed} teste(s) lidos · exit ${record.exitCode}`
     );
     for (const [acId, r] of Object.entries(record.results)) {
       const mark = r.status === 'pass' ? '✔' : r.status === 'skip' ? '○ SKIP (não é prova)' : '✘';
@@ -511,7 +523,7 @@ export async function run(argv) {
     const result = scaffoldTests(project, featureName, { force: Boolean(flags.force) });
     if (result.created) {
       console.log(`✔ ${result.created} criado com ${result.pending} teste(s)-esqueleto (todos FALHAM até você implementar)`);
-      console.log(`  ACs: ${result.acIds.join(', ')}`);
+      console.log(`  critérios cobertos: ${result.acIds.join(', ')}`);
     } else {
       console.log(result.message);
     }

@@ -39,7 +39,7 @@ function renderJsTest(style, story, ac) {
   for (const g of ac.given) lines.push(`  // Dado: ${g}`);
   for (const w of ac.when) lines.push(`  // Quando: ${w}`);
   for (const t of ac.then) lines.push(`  // Então: ${t}`);
-  lines.push(jsFail(style, `DoD de ${ac.id} ainda não provado — implemente este teste`));
+  lines.push(jsFail(style, `critério de aceite ${ac.id} ainda não provado — implemente este teste`));
   lines.push('});');
   return lines.join('\n');
 }
@@ -53,7 +53,7 @@ function renderPyTest(story, ac) {
   for (const g of ac.given) lines.push(`    # Dado: ${g}`);
   for (const w of ac.when) lines.push(`    # Quando: ${w}`);
   for (const t of ac.then) lines.push(`    # Então: ${t}`);
-  lines.push(`    raise AssertionError("DoD de ${ac.id} ainda não provado — implemente este teste")`);
+  lines.push(`    raise AssertionError("critério de aceite ${ac.id} ainda não provado — implemente este teste")`);
   return lines.join('\n');
 }
 
@@ -98,7 +98,7 @@ export function scaffoldTests(project, featureName, { force = false } = {}) {
   }
 
   if (pending.length === 0 && pendingPrinciples.length === 0) {
-    return { created: null, pending: 0, message: 'todos os ACs (e princípios) já têm teste anotado' };
+    return { created: null, pending: 0, message: 'todos os critérios de aceite (e princípios) já têm teste anotado' };
   }
   if (existsSync(outPath) && !force) {
     throw new Error(
