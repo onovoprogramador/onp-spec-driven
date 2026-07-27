@@ -27,9 +27,10 @@ const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 
 // Onde mora a skill: layout do repo (skills/onp-spec-driven) ou layout
 // embarcado (este arquivo em <skill>/scripts/lib/src → a skill é ../../..)
-function resolveSkillDir() {
+function resolveSkillDir(agent = 'claude') {
+  const dirName = agent === 'antigravity' ? 'onp-spec-driven-antigravity' : 'onp-spec-driven';
   const candidates = [
-    path.join(__dirname, '..', 'skills', 'onp-spec-driven'),
+    path.join(__dirname, '..', 'skills', dirName),
     path.join(__dirname, '..', '..', '..'),
   ];
   for (const dir of candidates) {
@@ -37,7 +38,6 @@ function resolveSkillDir() {
   }
   return null;
 }
-const SKILL_DIR = resolveSkillDir();
 
 const HELP = `onp-spec — spec-anchored development (a especificação que continua verdadeira)
 
@@ -140,13 +140,25 @@ function cmdInit(rootDir, flags) {
 
   if (flags.agents === 'claude' || flags.agents === true) {
     const dest = path.join(rootDir, '.claude', 'skills', 'onp-spec-driven');
-    if (!SKILL_DIR) {
+    const skillDir = resolveSkillDir('claude');
+    if (!skillDir) {
       console.log('· skill não encontrada junto ao motor — nada a instalar');
-    } else if (path.resolve(dest) === path.resolve(SKILL_DIR)) {
+    } else if (path.resolve(dest) === path.resolve(skillDir)) {
       console.log('· skill já instalada em .claude/skills/onp-spec-driven — mantida');
     } else {
-      copyDirIfExists(SKILL_DIR, dest);
+      copyDirIfExists(skillDir, dest);
       console.log('✔ skill instalada em .claude/skills/onp-spec-driven (Claude Code)');
+    }
+  } else if (flags.agents === 'antigravity') {
+    const dest = path.join(rootDir, '.agents', 'skills', 'onp-spec-driven');
+    const skillDir = resolveSkillDir('antigravity');
+    if (!skillDir) {
+      console.log('· skill não encontrada junto ao motor — nada a instalar');
+    } else if (path.resolve(dest) === path.resolve(skillDir)) {
+      console.log('· skill já instalada em .agents/skills/onp-spec-driven — mantida');
+    } else {
+      copyDirIfExists(skillDir, dest);
+      console.log('✔ skill instalada em .agents/skills/onp-spec-driven (Antigravity)');
     }
   }
 
@@ -447,7 +459,9 @@ export async function run(argv) {
     return 0;
   }
 
-  if (command === 'init') return cmdInit(rootDir, flags);
+  if (command === 'init') {
+    return cmdInit(rootDir, { preset: flags.preset, agents: flags.agents });
+  }
   if (command === 'new') return cmdNew(rootDir, positional[0], flags);
 
   const config = loadConfig(rootDir);

@@ -10,8 +10,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCRIPTS = path.join(ROOT, 'skills', 'onp-spec-driven', 'scripts');
-
+const SCRIPTS_CLAUDE = path.join(ROOT, 'skills', 'onp-spec-driven', 'scripts');
+const SCRIPTS_ANTIGRAVITY = path.join(ROOT, 'skills', 'onp-spec-driven-antigravity', 'scripts');
 export const ENTRY = `#!/usr/bin/env node
 // Entrypoint do motor embarcado da skill onp-spec-driven.
 // Uso (a partir da RAIZ do projeto do usuário):
@@ -30,19 +30,27 @@ run(process.argv.slice(2)).then(
 );
 `;
 
-export function buildSkill() {
-  rmSync(SCRIPTS, { recursive: true, force: true });
-  mkdirSync(path.join(SCRIPTS, 'lib'), { recursive: true });
-  cpSync(path.join(ROOT, 'src'), path.join(SCRIPTS, 'lib', 'src'), { recursive: true });
-  cpSync(path.join(ROOT, 'templates'), path.join(SCRIPTS, 'lib', 'templates'), {
+export function buildSkillDir(scriptsDir) {
+  rmSync(scriptsDir, { recursive: true, force: true });
+  mkdirSync(path.join(scriptsDir, 'lib'), { recursive: true });
+  cpSync(path.join(ROOT, 'src'), path.join(scriptsDir, 'lib', 'src'), { recursive: true });
+  cpSync(path.join(ROOT, 'templates'), path.join(scriptsDir, 'lib', 'templates'), {
     recursive: true,
     filter: (src) => !src.includes(`${path.sep}agents`),
   });
-  writeFileSync(path.join(SCRIPTS, 'onp-spec.mjs'), ENTRY);
-  return SCRIPTS;
+  writeFileSync(path.join(scriptsDir, 'onp-spec.mjs'), ENTRY);
+  return scriptsDir;
+}
+
+export function buildSkill() {
+  const out1 = buildSkillDir(SCRIPTS_CLAUDE);
+  const out2 = buildSkillDir(SCRIPTS_ANTIGRAVITY);
+  return [out1, out2];
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const out = buildSkill();
-  console.log(`✔ motor embarcado gerado em ${path.relative(ROOT, out)}/`);
+  const outs = buildSkill();
+  for (const out of outs) {
+    console.log(`✔ motor embarcado gerado em ${path.relative(ROOT, out)}/`);
+  }
 }
