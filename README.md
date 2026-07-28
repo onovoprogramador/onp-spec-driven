@@ -1,10 +1,9 @@
 # onp-spec-driven
 
-**A spec que continua verdadeira.** Desenvolvimento *spec-anchored*: a
-especificação é auditada mecanicamente contra o código — em CI, o tempo todo —
-em vez de virar mentira assim que o código evolui.
-
-Zero dependências. Instale com `npm i -g @onovoprogramador/onp-spec` e use o comando `onp-spec`.
+**A especificação que continua verdadeira.** Você descreve a feature, o agente
+de IA especifica, planeja, executa em paralelo e **prova** que fez — com
+auditoria mecânica, não com promessa. Se a spec e o código desalinham, a
+máquina acusa.
 
 ```
 ┌───────────┐  ┌────────┐  ┌───────┐  ┌───────┐  ┌────────┐  ┌───────┐
@@ -13,85 +12,124 @@ Zero dependências. Instale com `npm i -g @onovoprogramador/onp-spec` e use o co
                                           ↑ paralelismo         ↑ o gate mecânico
 ```
 
-## O problema que toda ferramenta de SDD tem
+## Instalação (2 minutos)
 
-Spec Kit, Kiro, OpenSpec — todas são **spec-first**: a spec dá clareza,
-gera o código, o código evolui e a spec vira ficção. Você fica com uma
-documentação que *parece* verdadeira e não é — falsa confiança no comportamento
-"documentado".
+A skill é **autossuficiente**: o motor mecânico já vem embarcado dentro dela
+(zero dependências — só precisa de Node.js ≥ 18 no ambiente, que seu agente já
+usa). Instalar é colocar uma pasta no lugar certo. Escolha o seu agente:
 
-O ponto ideal é **spec-anchored**: spec e código evoluem juntos porque um teste
-automatizado força o alinhamento. Quase nenhuma ferramenta entrega isso. Esta
-entrega.
+### Claude Code
 
-## Os 5 diferenciais
-
-### 1. Uma spec que você audita contra o código
-
-Cada história ganha um ID, cada critério de aceite ganha um ID, cada task
-referencia esses IDs, e cada critério aponta o teste que o prova. Aí você
-pergunta **mecanicamente**:
+Na **raiz do seu projeto**:
 
 ```bash
-onp-spec audit          # qual requisito NÃO tem teste? que teste não mapeia
-                        # pra requisito nenhum? que código é órfão?
+npx @onovoprogramador/onp-spec init --agents claude
 ```
 
-### 2. Um "pronto" que a máquina verifica
+Pronto: isso cria a estrutura `.spec/` do projeto **e** instala a skill em
+`.claude/skills/onp-spec-driven/`. Abra uma conversa nova no Claude Code e a
+skill já está ativa.
 
-EARS deixa o requisito bonito, mas não o torna executável. Aqui, cada
-definição de pronto nasce como um teste (`Dado/Quando/Então` → código de teste
-com a tag `@spec:AC-xxx`). O agente **não consegue** declarar vitória
-prematura:
+### Antigravity
+
+Na **raiz do seu projeto**:
 
 ```bash
-onp-spec verify entrega   # o test runner decide, não a sua palavra
-onp-spec audit --ci       # exit 1 se algum critério de aceite não tem prova PASS
+npx @onovoprogramador/onp-spec init --agents antigravity
 ```
 
-### 3. Suposições e perguntas como cidadãs de primeira classe
+Isso cria a estrutura `.spec/` **e** instala a skill em
+`.agents/skills/onp-spec-driven/` (o diretório de skills do workspace do
+Antigravity). Abra uma conversa nova e pronto.
 
-A crítica mais forte à SDD é empurrar você para uma spec "completa" e gerar falsa
-confiança. Aqui a IA é **obrigada** a registrar as suposições (o que assumiu,
-`ASM-xxx`) e as perguntas em aberto (`Q-xxx`), com status. Uma feature não vira `implementada` com
-suposição aberta — o audit bloqueia. Você aponta na tela: *"olha, ele assumiu que
-trabalho não pode ser reenviado — é isso que a gente quer?"*
+### Sem npm/npx (instalação manual)
 
-### 4. Constituição de educação + privacidade (LGPD)
-
-As outras são propositalmente agnósticas de domínio. Esta traz uma **constituição
-versionada** com níveis de obrigação (`[DEVE]`/`[RECOMENDADO]`/`[PODE]`), e todo
-`[DEVE]` tem verificação executável — rastreada até **arquivo e linha**:
+Baixe o repositório e copie a pasta da skill do seu agente:
 
 ```bash
-onp-spec init --preset lgpd-educacao
+git clone --depth 1 https://github.com/onovoprogramador/onp-spec-driven.git /tmp/onp-spec
+
+# Claude Code (neste projeto)
+mkdir -p .claude/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven .claude/skills/onp-spec-driven
+
+# Antigravity (neste workspace)
+mkdir -p .agents/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity .agents/skills/onp-spec-driven
 ```
 
-> P-001 [DEVE] Nota de um aluno nunca é exposta a outro aluno
-> P-002 [DEVE] Acesso a nota é registrado (trilha de auditoria)
-> P-004 [DEVE] Dados pessoais nunca em log — `verificação(proibido)` via grep
+Quer a skill disponível em **todos** os seus projetos? Copie para o diretório
+global do agente em vez do projeto: `~/.claude/skills/` (Claude Code) ou
+`~/.gemini/config/skills/` (Antigravity).
 
-### 5. Lições aprendidas com lastro mecânico
+> **Importante:** cada agente tem a SUA skill — a do Claude Code executa o
+> plano com sessões headless paralelas do próprio Claude; a do Antigravity usa
+> os agentes paralelos nativos dele. Não misture as pastas (a skill sabe se
+> defender, mas por que arriscar?).
 
-O projeto melhora de feature em feature — sem virar log morto. Todo achado de
-audit e toda falha de verify vira um **sinal** registrado pelo motor; a IA
-fraseia a regra geral, mas `licoes add` **recusa** qualquer lição que não
-cite um sinal real (`LICAO_SEM_LASTRO`). Seletividade é mecânica: lição nasce
-`candidata`, só vira `confirmada` (e entra no guia) ao recorrer em **features
-distintas**; a que falha quando aplicada vai para quarentena; candidata
-estagnada é podada. A listagem tem teto fixo — funciona igual num repo com
-centenas de features e dezenas de domínios (`--escopo cobranca/boleto`).
+## Como usar — você fala, o agente prova
 
-```bash
-onp-spec licoes sugerir   # o motor aponta ONDE vale uma lição (recorrência real)
-onp-spec licoes add ...   # com lastro; sem sinal registrado, é recusada
-onp-spec licoes list      # o guia carregado no início de cada feature
-```
+Você **não precisa aprender comando nenhum**. Os comandos `onp-spec …` que
+aparecem pelo repositório são internos da skill: o agente os executa por você
+e cola a prova na conversa. Seu trabalho é conversar:
 
-## Resultado do benchmark
+> *"Especifica a feature de inscrição de alunos."*
+>
+> *"Boa. Divide em tarefas e gera o plano de execução paralela."*
+>
+> *"Executa o plano."*
+>
+> *"Audita o que foi feito contra a spec e me mostra a prova."*
 
-Specs reais do domínio, com defeitos que de fato adoecem projetos SDD. Mede-se a
-**detecção mecânica** (o que o CI pega sozinho). Reproduza com `node benchmark/run.js`.
+O que você recebe de volta, sempre em português simples:
+
+- **Especificação legível** em `.spec/features/<feature>/` — histórias de
+  usuário e critérios de aceite escritos para gente (o detalhe técnico vai
+  entre parênteses), mais as **suposições** e **perguntas em aberto** que o
+  agente é obrigado a confessar.
+- **Plano de execução visual** — tarefas que não se tocam rodam **em
+  paralelo**, cada uma em sua janela limpa (git worktree + branch próprios).
+  No Claude Code, o plano vem com `plano-execucao.html` e o botão
+  **"Executar todas as tarefas em janelas limpas e paralelas"**; no
+  Antigravity, com um prompt pronto por faixa para os agentes paralelos.
+- **Gestão de commits e branches feita** — 1 tarefa = 1 commit rastreável,
+  merges organizados, árvore limpa no final.
+- **A prova** — ao final, a auditoria mecânica: cada critério de aceite tem um
+  teste que passou, ou a feature **não está pronta**. O veredito é um exit
+  code, não uma frase do agente.
+
+## Por que "spec-anchored" (e não spec-first)
+
+Spec Kit, Kiro, OpenSpec — todas são **spec-first**: a spec gera o código, o
+código evolui, e a spec vira ficção bem formatada. Aqui é **spec-anchored**:
+spec e código evoluem juntos porque um gate mecânico força o alinhamento, o
+tempo todo. A diferença aparece no dia em que alguém pergunta "isso aqui ainda
+funciona como está escrito?" — e a resposta é um comando, não uma reunião.
+
+## O que a skill garante
+
+1. **Rastreabilidade de ponta a ponta** — cada história, critério de aceite e
+   tarefa tem um código; cada critério aponta o teste que o prova. "Qual
+   requisito não tem teste?" é uma pergunta que a máquina responde.
+2. **"Pronto" é veredito da máquina** — o agente não consegue declarar vitória:
+   quem decide é o test runner, e **teste pulado não conta como prova**.
+3. **Suposições e perguntas obrigatórias** — o que o agente assumiu sem
+   confirmar fica registrado com status; feature não fecha com suposição em
+   aberto. Você aponta na tela: *"ele assumiu que não pode reenviar — é isso
+   mesmo?"*
+4. **Constituição do projeto** — regras inegociáveis (preset pronto de
+   LGPD/educação: "nota de aluno nunca exposta a outro aluno", "dado pessoal
+   nunca em log") com verificação executável, rastreada até arquivo e linha.
+5. **Lições com lastro** — o projeto aprende de feature em feature, mas só
+   entra lição ancorada em falha real registrada; opinião solta é recusada.
+6. **Execução paralela planejada** — tarefas de arquivos disjuntos rodam ao
+   mesmo tempo, em janelas de contexto limpas, com branches e commits
+   organizados pelo plano — e o gate final fecha tudo.
+
+## Funciona de verdade?
+
+Benchmark com specs reais do domínio e defeitos que de fato adoecem projetos
+de SDD, medindo **detecção mecânica** (o que o CI pega sozinho):
 
 | Ferramenta | Detecção de defeitos | |
 |---|---|---|
@@ -100,77 +138,19 @@ Specs reais do domínio, com defeitos que de fato adoecem projetos SDD. Mede-se 
 | spec-kit | 0% mecânico | scaffolding; testes opcionais |
 
 Detalhes e matriz completa: [benchmark/RESULTS.md](benchmark/RESULTS.md).
-
-## Início rápido
-
-```bash
-# instale uma vez (global) — ou use como dev dependency no projeto
-npm install -g @onovoprogramador/onp-spec
-
-# no seu projeto
-onp-spec init --preset lgpd-educacao
-onp-spec new entrega-dever-casa
-
-# escreva as histórias de usuário e os critérios de aceite (Dado/Quando/Então)
-# e registre Suposições/Perguntas, então:
-onp-spec scaffold entrega-dever-casa   # cada critério vira um teste que FALHA
-# ...implemente até passar...
-onp-spec verify entrega-dever-casa     # o runner grava a prova
-onp-spec audit --ci                    # exit 0 = alinhado
-```
-
-> Sem instalar (roda direto do npm): `npx @onovoprogramador/onp-spec init`.
-
 Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma).
 
-## Comandos
+## Para os curiosos
 
-| Comando | O que faz |
-|---|---|
-| `init [--preset base\|lgpd-educacao] [--agents claude\|antigravity]` | cria `.spec/`, constituição e config (e instala a skill do agente) |
-| `new <feature>` | cria `spec.md` e `tasks.md` com códigos de rastreio contínuos |
-| `plano <feature> [--agents claude\|antigravity]` | faixas paralelas (arquivos disjuntos → worktree + branch + janela limpa) e artefatos de execução |
-| `tarefa <feature> <T-xxx> <status>` | atualiza o status da tarefa no tasks.md |
-| `scaffold <feature>` | gera teste-esqueleto (que falha) para cada critério de aceite |
-| `verify <feature>` | roda os testes e grava a prova por critério de aceite |
-| `audit [--ci] [--json] [--md]` | o gate: especificação ↔ tarefas ↔ testes ↔ código ↔ constituição |
-| `status` | painel de features, critérios provados, suposições/perguntas abertas |
-| `assumptions` | lista suposições e perguntas com status |
-| `licoes <add\|list\|sugerir\|penalizar\|status>` | lições com lastro: add exige sinal real; promoção por recorrência entre features |
-
-## Catálogo de achados do audit
-
-`AC_SEM_TESTE`, `AC_SEM_PROVA`, `TESTE_ORFAO`, `REF_QUEBRADA`, `US_SEM_AC`,
-`AC_INCOMPLETO`, `AC_SEM_TASK`, `ARQUIVO_ORFAO`, `TASK_CONCLUIDA_SEM_PROVA`,
-`ASM_ABERTA`, `Q_ABERTA`, `PRINCIPIO_SEM_VERIFICACAO`, `PRINCIPIO_VIOLADO`,
-`ID_DUPLICADO`, `VERIFY_OBSOLETO`. Descrição de cada um em
-[ARQUITETURA.md](ARQUITETURA.md).
-
-## Para agentes de IA — o caminho principal
-
-Há **duas skills autossuficientes**, cada uma com o motor mecânico embarcado
-(`scripts/onp-spec.mjs`, zero dependências) — instalar é copiar a pasta:
-
-| Agente | Skill | Instala em | Execução paralela do plano |
-|---|---|---|---|
-| Claude Code | `skills/onp-spec-driven/` | `.claude/skills/` | `executar-tarefas.sh` (claude headless com `--model`/`--effort` por tarefa) + `plano-execucao.html` com o botão "Executar todas as tarefas em janelas limpas e paralelas" |
-| Antigravity | `skills/onp-spec-driven-antigravity/` | `.agents/skills/` | agentes paralelos nativos: um por faixa, com prompt pronto no `plano-execucao.md` (não depende do CLI do Claude) |
-
-Nas duas, `onp-spec plano <feature>` agrupa tarefas de arquivos disjuntos em
-**faixas paralelas** (1 faixa = 1 git worktree + 1 branch + 1 janela de
-contexto limpa), com gestão de branches/commits e o gate final (verify +
-audit) fechando o ciclo. A skill dirige o agente pelo fluxo e o obriga a
-fechar com o audit em modo CI limpo. A prova não é a palavra do agente — é o
-exit code (e teste pulado não conta como prova).
-
-Quem já usa a CLI: `onp-spec init --agents claude` (ou `--agents antigravity`)
-também instala a skill. O motor embarcado das duas é gerado de `src/` por
-`node tools/build-skill.mjs` (o teste `skill-sync` acusa divergência em
-qualquer uma).
+O motor que a skill embarca também existe como CLI standalone
+(`npm i -g @onovoprogramador/onp-spec`) e roda em CI — o mesmo audit que trava
+o agente trava o pipeline. Arquitetura, catálogo completo de achados e formato
+dos arquivos: [ARQUITETURA.md](ARQUITETURA.md). O guia que o agente segue está
+na própria skill: [skills/onp-spec-driven/SKILL.md](skills/onp-spec-driven/SKILL.md).
 
 ## Requisitos
 
-Node.js ≥ 18. Sem outras dependências.
+Node.js ≥ 18. Sem outras dependências — nem para você, nem para o agente.
 
 ## Licença
 
