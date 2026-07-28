@@ -7,10 +7,10 @@ em vez de virar mentira assim que o código evolui.
 Zero dependências. Instale com `npm i -g @onovoprogramador/onp-spec` e use o comando `onp-spec`.
 
 ```
-┌────────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐
-│ ESPECIFICAR │→ │ PROJETAR │→ │ TAREFAS │→ │ EXECUTAR │→ │ AUDITAR  │
-└────────────┘  └──────────┘  └─────────┘  └──────────┘  └──────────┘
-                                                            ↑ o gate mecânico
+┌───────────┐  ┌────────┐  ┌───────┐  ┌───────┐  ┌────────┐  ┌───────┐
+│ESPECIFICAR│→ │PROJETAR│→ │TAREFAS│→ │ PLANO │→ │EXECUTAR│→ │AUDITAR│
+└───────────┘  └────────┘  └───────┘  └───────┘  └────────┘  └───────┘
+                                          ↑ paralelismo         ↑ o gate mecânico
 ```
 
 ## O problema que toda ferramenta de SDD tem
@@ -127,8 +127,10 @@ Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma
 
 | Comando | O que faz |
 |---|---|
-| `init [--preset base\|lgpd-educacao]` | cria `.spec/`, constituição e config |
+| `init [--preset base\|lgpd-educacao] [--agents claude\|antigravity]` | cria `.spec/`, constituição e config (e instala a skill do agente) |
 | `new <feature>` | cria `spec.md` e `tasks.md` com códigos de rastreio contínuos |
+| `plano <feature> [--agents claude\|antigravity]` | faixas paralelas (arquivos disjuntos → worktree + branch + janela limpa) e artefatos de execução |
+| `tarefa <feature> <T-xxx> <status>` | atualiza o status da tarefa no tasks.md |
 | `scaffold <feature>` | gera teste-esqueleto (que falha) para cada critério de aceite |
 | `verify <feature>` | roda os testes e grava a prova por critério de aceite |
 | `audit [--ci] [--json] [--md]` | o gate: especificação ↔ tarefas ↔ testes ↔ código ↔ constituição |
@@ -144,18 +146,27 @@ Exemplo completo e rodável: [examples/inscricao-turma](examples/inscricao-turma
 `ID_DUPLICADO`, `VERIFY_OBSOLETO`. Descrição de cada um em
 [ARQUITETURA.md](ARQUITETURA.md).
 
-## Para agentes de IA (Claude Code, Cursor) — o caminho principal
+## Para agentes de IA — o caminho principal
 
-A skill em `skills/onp-spec-driven/` é **autossuficiente**: carrega o motor
-mecânico embarcado (`scripts/onp-spec.mjs`, zero dependências) e a instalação
-inteira é copiar a pasta para `.claude/skills/` do projeto — sem npm, sem npx.
-Ela dirige o agente pelo fluxo e o obriga a fechar com o audit em modo CI
-limpo. A prova não é a palavra do agente — é o exit code (e teste pulado não
-conta como prova).
+Há **duas skills autossuficientes**, cada uma com o motor mecânico embarcado
+(`scripts/onp-spec.mjs`, zero dependências) — instalar é copiar a pasta:
 
-Quem já usa a CLI: `onp-spec init --agents claude` também instala a skill.
-O motor embarcado é gerado de `src/` por `node tools/build-skill.mjs` (o teste
-`skill-sync` acusa divergência).
+| Agente | Skill | Instala em | Execução paralela do plano |
+|---|---|---|---|
+| Claude Code | `skills/onp-spec-driven/` | `.claude/skills/` | `executar-tarefas.sh` (claude headless com `--model`/`--effort` por tarefa) + `plano-execucao.html` com o botão "Executar todas as tarefas em janelas limpas e paralelas" |
+| Antigravity | `skills/onp-spec-driven-antigravity/` | `.agents/skills/` | agentes paralelos nativos: um por faixa, com prompt pronto no `plano-execucao.md` (não depende do CLI do Claude) |
+
+Nas duas, `onp-spec plano <feature>` agrupa tarefas de arquivos disjuntos em
+**faixas paralelas** (1 faixa = 1 git worktree + 1 branch + 1 janela de
+contexto limpa), com gestão de branches/commits e o gate final (verify +
+audit) fechando o ciclo. A skill dirige o agente pelo fluxo e o obriga a
+fechar com o audit em modo CI limpo. A prova não é a palavra do agente — é o
+exit code (e teste pulado não conta como prova).
+
+Quem já usa a CLI: `onp-spec init --agents claude` (ou `--agents antigravity`)
+também instala a skill. O motor embarcado das duas é gerado de `src/` por
+`node tools/build-skill.mjs` (o teste `skill-sync` acusa divergência em
+qualquer uma).
 
 ## Requisitos
 

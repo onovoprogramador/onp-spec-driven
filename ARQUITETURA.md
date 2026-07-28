@@ -163,6 +163,35 @@ a AC com teste anotado, e sempre com o aviso PROVA_FRACA.
 Verify roda o comando, extrai resultado POR TESTE, casa títulos com `@spec:AC-xxx` e grava
 `.spec/verification/<feature>.json` com {ac, status, teste, timestamp, gitRev}. Audit consome isso.
 
+## Plano de execução (src/core/plano.js)
+
+`onp-spec plano <feature>` transforma o tasks.md em faixas de execução:
+tarefas com `Arquivos:` **disjuntos** viram faixas PARALELAS (componentes
+conexos do grafo de conflito de arquivos — 1 faixa = 1 git worktree + 1
+branch `spec/<feature>-faixa-N` + 1 janela de contexto limpa); tarefas que
+compartilham arquivo caem na mesma faixa em sequência; tarefa sem `Arquivos:`
+roda sozinha ao final na árvore principal. `paralelo.maxParalelas` (config,
+default 3) divide as faixas em ondas. `Modelo:`/`Esforço:` por tarefa (ou
+defaults `paralelo.model`/`paralelo.esforco`) alimentam o executor.
+
+O cálculo é agnóstico de agente; os artefatos variam (`--agents`, com
+auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
+
+- **sempre**: `plano-execucao.md` — faixas/ondas, gestão de branches e
+  commits (1 tarefa = 1 commit `T-xxx <feature>: título`; merge `--no-ff` na
+  branch de trabalho `spec/<feature>`; gate final verify + audit).
+- **claude**: `executar-tarefas.sh` (headless: `claude -p` por tarefa com
+  `--model`/`--effort`, permission-mode `paralelo.permissionMode` default
+  acceptEdits + allowedTools derivada do testCommand; valida ambiente e árvore
+  limpa; auto-commita artefatos do plano; mescla, marca `[concluida]` via
+  `onp-spec tarefa`, fecha a contabilidade no git e roda o gate) e
+  `plano-execucao.html` (visual com o botão que copia o comando do script).
+- **antigravity**: o md ganha comandos de worktree e um prompt pronto por
+  faixa para os agentes paralelos nativos — nunca depende do CLI do Claude.
+
+`onp-spec tarefa <feature> <T-xxx> <status>` é o utilitário mecânico de
+atualização de status usado pelo executor (e por humanos).
+
 ## Camada de lições (src/core/sinais.js + src/core/licoes.js)
 
 O agente entra com o julgamento (frasear a regra geral); o motor é dono de
