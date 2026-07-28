@@ -1,5 +1,5 @@
-// Garante que o motor embarcado na skill (skills/onp-spec-driven/scripts/)
-// está sincronizado com src/ e templates/ — mata o drift silencioso (SK-5).
+// Garante que o motor embarcado em CADA skill (claude e antigravity) está
+// sincronizado com src/ e templates/ — mata o drift silencioso (SK-5).
 // Se este teste falhar: node tools/build-skill.mjs
 
 import { test } from 'node:test';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { ENTRY } from '../tools/build-skill.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCRIPTS = path.join(ROOT, 'skills', 'onp-spec-driven', 'scripts');
+const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity'];
 
 function walk(dir, base = dir) {
   const out = [];
@@ -23,36 +23,53 @@ function walk(dir, base = dir) {
   return out.sort();
 }
 
-test('skill embarcada existe (rode: node tools/build-skill.mjs)', () => {
-  assert.ok(existsSync(SCRIPTS), 'skills/onp-spec-driven/scripts/ não existe');
-});
+for (const skill of SKILLS) {
+  const SCRIPTS = path.join(ROOT, 'skills', skill, 'scripts');
 
-test('scripts/lib/src espelha src/ byte a byte', () => {
-  const srcFiles = walk(path.join(ROOT, 'src'));
-  const libFiles = walk(path.join(SCRIPTS, 'lib', 'src'));
-  assert.deepEqual(libFiles, srcFiles, 'lista de arquivos diverge — regenere o build');
-  for (const rel of srcFiles) {
-    assert.equal(
-      readFileSync(path.join(SCRIPTS, 'lib', 'src', rel), 'utf-8'),
-      readFileSync(path.join(ROOT, 'src', rel), 'utf-8'),
-      `conteúdo diverge: ${rel} — rode node tools/build-skill.mjs`
-    );
-  }
-});
+  test(`[${skill}] motor embarcado existe (rode: node tools/build-skill.mjs)`, () => {
+    assert.ok(existsSync(SCRIPTS), `skills/${skill}/scripts/ não existe`);
+  });
 
-test('scripts/lib/templates espelha templates/ (sem agents/)', () => {
-  const tplFiles = walk(path.join(ROOT, 'templates')).filter((f) => !f.startsWith('agents/'));
-  const libFiles = walk(path.join(SCRIPTS, 'lib', 'templates'));
-  assert.deepEqual(libFiles, tplFiles);
-  for (const rel of tplFiles) {
-    assert.equal(
-      readFileSync(path.join(SCRIPTS, 'lib', 'templates', rel), 'utf-8'),
-      readFileSync(path.join(ROOT, 'templates', rel), 'utf-8'),
-      `template diverge: ${rel}`
-    );
-  }
-});
+  test(`[${skill}] scripts/lib/src espelha src/ byte a byte`, () => {
+    const srcFiles = walk(path.join(ROOT, 'src'));
+    const libFiles = walk(path.join(SCRIPTS, 'lib', 'src'));
+    assert.deepEqual(libFiles, srcFiles, 'lista de arquivos diverge — regenere o build');
+    for (const rel of srcFiles) {
+      assert.equal(
+        readFileSync(path.join(SCRIPTS, 'lib', 'src', rel), 'utf-8'),
+        readFileSync(path.join(ROOT, 'src', rel), 'utf-8'),
+        `conteúdo diverge: ${rel} — rode node tools/build-skill.mjs`
+      );
+    }
+  });
 
-test('entrypoint onp-spec.mjs é o gerado pelo build', () => {
-  assert.equal(readFileSync(path.join(SCRIPTS, 'onp-spec.mjs'), 'utf-8'), ENTRY);
+  test(`[${skill}] scripts/lib/templates espelha templates/ (sem agents/)`, () => {
+    const tplFiles = walk(path.join(ROOT, 'templates')).filter((f) => !f.startsWith('agents/'));
+    const libFiles = walk(path.join(SCRIPTS, 'lib', 'templates'));
+    assert.deepEqual(libFiles, tplFiles);
+    for (const rel of tplFiles) {
+      assert.equal(
+        readFileSync(path.join(SCRIPTS, 'lib', 'templates', rel), 'utf-8'),
+        readFileSync(path.join(ROOT, 'templates', rel), 'utf-8'),
+        `template diverge: ${rel}`
+      );
+    }
+  });
+
+  test(`[${skill}] entrypoint onp-spec.mjs é o gerado pelo build`, () => {
+    assert.equal(readFileSync(path.join(SCRIPTS, 'onp-spec.mjs'), 'utf-8'), ENTRY);
+  });
+}
+
+// A SKILL.md de cada skill declara seu agente (o init usa o marcador para não
+// instalar a skill errada) e ambas mantêm a MESMA versão (política: bump junto).
+test('SKILL.md: marcador agent correto e versões alinhadas', () => {
+  const frontmatter = (skill) =>
+    readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf-8').split('---')[1];
+  const claude = frontmatter('onp-spec-driven');
+  const ag = frontmatter('onp-spec-driven-antigravity');
+  assert.match(claude, /^\s*agent:\s*claude\s*$/m);
+  assert.match(ag, /^\s*agent:\s*antigravity\s*$/m);
+  const versao = (fm) => fm.match(/^\s*version:\s*(\S+)/m)?.[1];
+  assert.equal(versao(claude), versao(ag), 'versões das duas skills divergem — bump junto');
 });

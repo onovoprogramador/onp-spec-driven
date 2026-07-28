@@ -20,6 +20,20 @@ export const DEFAULT_CONFIG = {
   reporterOutputFile: null,
   // camada de lições: limiares de promoção/quarentena, janela e tetos
   licoes: { ...LICOES_DEFAULTS },
+  // plano de execução (onp-spec plano): paralelismo e defaults do executor
+  paralelo: {
+    // máximo de faixas rodando ao mesmo tempo numa onda
+    maxParalelas: 3,
+    // modelo default por tarefa (tasks.md pode sobrescrever com `- Modelo:`)
+    model: 'claude-sonnet-5',
+    // esforço default: baixo|medio|alto|xalto|max (ou low|medium|high|xhigh|max)
+    esforco: 'medium',
+    // modo de permissão do claude headless; para rodar 100% sem prompts o
+    // usuário pode trocar para bypassPermissions (decisão explícita dele)
+    permissionMode: 'acceptEdits',
+    // override da lista --allowedTools (null = derivada do testCommand + git)
+    allowedTools: null,
+  },
 };
 
 export function loadConfig(rootDir) {
@@ -37,6 +51,7 @@ export function loadConfig(rootDir) {
     ...DEFAULT_CONFIG,
     ...raw,
     licoes: { ...DEFAULT_CONFIG.licoes, ...(raw.licoes || {}) },
+    paralelo: { ...DEFAULT_CONFIG.paralelo, ...(raw.paralelo || {}) },
     rootDir,
     configPath,
   };

@@ -14,6 +14,9 @@ const RE_TASK_ANY = new RegExp(`^##\\s+(T-\\d{3,})\\s*${DASH}\\s*(.+?)\\s*$`);
 const RE_STATUS_SUFFIX = /^(.*?)\s*\[([^\]]+)\]\s*$/;
 const RE_REFS = /^\s*[-*]\s*Refs\s*:\s*(.+?)\s*$/i;
 const RE_FILES = /^\s*[-*]\s*Arquivos\s*:\s*(.+?)\s*$/i;
+// campos opcionais usados pelo plano de execução (onp-spec plano)
+const RE_MODEL = /^\s*[-*]\s*Modelo\s*:\s*(.+?)\s*$/i;
+const RE_EFFORT = /^\s*[-*]\s*Esfor[cç]o\s*:\s*(.+?)\s*$/i;
 
 export const TASK_STATUSES = ['pendente', 'em-andamento', 'concluida'];
 
@@ -53,7 +56,7 @@ export function parseTasks(content, { file = 'tasks.md' } = {}) {
           message: `${task[1]} sem status explícito — assumindo [pendente]`,
         });
       }
-      current = { id: task[1], title, status, line: lineNo, refs: [], files: [] };
+      current = { id: task[1], title, status, line: lineNo, refs: [], files: [], model: null, esforco: null };
       result.tasks.push(current);
       continue;
     }
@@ -88,6 +91,18 @@ export function parseTasks(content, { file = 'tasks.md' } = {}) {
         .map((s) => s.trim().replace(/^`|`$/g, ''))
         .filter(Boolean);
       current.files.push(...paths);
+      continue;
+    }
+
+    const model = line.match(RE_MODEL);
+    if (model) {
+      current.model = model[1].replace(/^`|`$/g, '');
+      continue;
+    }
+
+    const effort = line.match(RE_EFFORT);
+    if (effort) {
+      current.esforco = effort[1].replace(/^`|`$/g, '');
     }
   }
 

@@ -59,7 +59,35 @@ onp-spec scaffold entrega-dever-casa
 #   (inclui esqueletos p/ princípios da constituição com verificação(teste))
 ```
 
-Agora implemente a lógica e preencha os testes. Rode:
+## Paralelizando: `onp-spec plano` (2+ tarefas pendentes)
+
+Com as tarefas escritas em `tasks.md` (com `Arquivos:` honestos), o motor
+monta o plano de execução:
+
+```bash
+onp-spec plano entrega-dever-casa
+```
+
+- Tarefas de **arquivos disjuntos** viram **faixas paralelas**: 1 faixa =
+  1 git worktree + 1 branch (`spec/<feature>-faixa-N`) + 1 janela de contexto
+  limpa. Tarefas que compartilham arquivo caem na mesma faixa, em sequência;
+  tarefa sem `Arquivos:` roda sozinha ao final.
+- Campos opcionais por tarefa em tasks.md: `- Modelo: claude-sonnet-5` e
+  `- Esforço: alto` (baixo|medio|alto|xalto|max) — o plano usa nos executores.
+- Sai sempre `plano-execucao.md` (faixas, ondas, gestão de branches/commits,
+  ordem de merge e gate final). Na skill do **Claude Code**, saem também
+  `executar-tarefas.sh` (claude headless em paralelo, com `--model`/`--effort`
+  por tarefa) e `plano-execucao.html` (visual, com o botão "Executar todas as
+  tarefas em janelas limpas e paralelas"). Na skill do **Antigravity**, o
+  plano traz um prompt pronto por faixa para os agentes paralelos nativos.
+- A gestão de commits é do plano: **1 tarefa = 1 commit** (`T-003 <feature>:
+  <título>`), merges `--no-ff` de volta na branch de trabalho `spec/<feature>`,
+  e o gate final (verify + audit) roda depois de tudo mesclado.
+
+Regenere o plano sempre que tasks.md ou a config `paralelo` mudarem — os
+artefatos avisam que não devem ser editados à mão.
+
+Agora implemente a lógica e preencha os testes (ou deixe o plano executar). Rode:
 
 ```bash
 # 4. o runner prova (ou não) — teste PULADO não conta como prova

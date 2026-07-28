@@ -27,7 +27,10 @@ Uma frase sobre o problema que esta feature resolve e para quem.
 
 Como [papel], quero [ação], para que [valor].
 
-<!-- Critério de aceite: o resultado observável que um teste consegue checar. -->
+<!-- Critério de aceite: o resultado observável que um teste consegue checar.
+     Escreva para GENTE: título e Então descrevem o que o usuário vê
+     ("a tela avisa X"), não o detalhe técnico ("endpoint retorna 403") —
+     o detalhe pode ir entre parênteses. -->
 
 #### AC-001 — [título do critério de aceite]
 

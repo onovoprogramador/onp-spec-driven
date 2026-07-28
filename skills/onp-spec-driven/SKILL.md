@@ -1,10 +1,11 @@
 ---
 name: onp-spec-driven
-description: Desenvolvimento spec-anchored — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição de princípios verificáveis (preset LGPD/educação) e lições aprendidas com lastro mecânico (o motor recusa lição sem sinal real de audit/verify; promoção por recorrência entre features). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "o que não tem teste", "lições aprendidas". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
+description: Desenvolvimento spec-anchored — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição de princípios verificáveis (preset LGPD/educação), lições aprendidas com lastro mecânico (o motor recusa lição sem sinal real de audit/verify; promoção por recorrência entre features) e plano de execução PARALELA (tarefas de arquivos disjuntos viram faixas em git worktrees, executadas por claude headless com modelo e esforço por tarefa — inclui script pronto e artefato visual com botão). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 2.2.0
+  version: 3.1.0
+  agent: claude
 ---
 
 # onp-spec-driven — a especificação que continua verdadeira
@@ -15,10 +16,10 @@ especificação é auditada mecanicamente contra o código, o tempo todo. Você 
 confia que o agente obedeceu — **a máquina prova, via exit code**.
 
 ```
-┌───────────┐   ┌──────────┐   ┌─────────┐   ┌──────────┐   ┌──────────┐
-│ ESPECIFICAR│→ │ PROJETAR │ → │ TAREFAS │ → │ EXECUTAR │ → │ AUDITAR  │
-└───────────┘   └──────────┘   └─────────┘   └──────────┘   └──────────┘
-   sempre        se preciso     se grande      sempre         SEMPRE (gate)
+┌───────────┐  ┌────────┐  ┌───────┐  ┌───────┐  ┌────────┐  ┌───────┐
+│ESPECIFICAR│→ │PROJETAR│→ │TAREFAS│→ │ PLANO │→ │EXECUTAR│→ │AUDITAR│
+└───────────┘  └────────┘  └───────┘  └───────┘  └────────┘  └───────┘
+   sempre      se preciso   se grande  2+ tarefas   sempre    SEMPRE (gate)
 ```
 
 ## Vocabulário — fale sempre em português simples
@@ -46,6 +47,10 @@ as siglas para entender o que você disse.
 Esta skill roda dentro do Claude Code. Use os recursos nativos para deixar o
 fluxo visível e interativo, sem virar burocracia:
 
+- **Explique o que fez e onde está**: depois de CADA ação, diga em português
+  simples (1) o que foi feito, (2) o caminho de cada arquivo criado ou
+  alterado, (3) qual é o próximo passo. O usuário nunca deveria precisar
+  perguntar "cadê o arquivo?" nem "e agora?".
 - **Lista de tarefas nativa (TodoWrite)**: ao iniciar uma feature, crie um
   todo por fase ("Especificar entrega-dever", "Escrever testes", "Implementar",
   "Auditar"...). Em features grandes, um todo por tarefa (T-xxx) na fase
@@ -77,6 +82,7 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 ```
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
+`plano <feature> [--agents claude]` · `tarefa <feature> <T-xxx> <status>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
 `audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
 `licoes <add|list|sugerir|penalizar|status>`.
@@ -112,11 +118,11 @@ fosse o gate mecânico.
 
 ## Auto-dimensionamento
 
-| Escopo | Especificar | Projetar | Tarefas | Executar |
-|---|---|---|---|---|
-| Pequeno (≤3 arquivos) | spec enxuta | pular | implícito | implementar + verify + audit |
-| Médio (<10 tarefas) | spec completa | inline | inline | implementar + verify + audit |
-| Grande (multi-componente) | spec + design | design.md | tasks.md | por tarefa + verify + audit |
+| Escopo | Especificar | Projetar | Tarefas | Plano | Executar |
+|---|---|---|---|---|---|
+| Pequeno (≤3 arquivos) | spec enxuta | pular | implícito | pular | implementar + verify + audit |
+| Médio (<10 tarefas) | spec completa | inline | inline | se 2+ tarefas | implementar + verify + audit |
+| Grande (multi-componente) | spec + design | design.md | tasks.md | sempre | por faixa + verify + audit |
 
 **Sempre obrigatórios:** Especificar e Auditar.
 **Válvula de segurança:** mesmo pulando Tarefas, comece o Executar listando os
@@ -154,25 +160,46 @@ produto).
 - Em `tasks.md`, quebre em **tarefas (T-xxx)**. Cada tarefa tem `Refs:` (as
   histórias/critérios que atende — códigos são globais, pode referenciar
   critério de outra feature) e `Arquivos:` (separados por VÍRGULA; espaços em
-  caminhos são permitidos).
+  caminhos são permitidos). Campos opcionais por tarefa: `Modelo:` e
+  `Esforço:` (baixo|medio|alto|xalto|max) — o plano de execução usa os dois.
 - Status entre colchetes: `[pendente]`, `[em-andamento]`, `[concluida]`
   (acentos e maiúsculas são tolerados; token desconhecido é erro).
 
-### 4. Executar
+### 4. Plano de execução (2+ tarefas pendentes)
+
+- `onp-spec plano <feature>` agrupa tarefas de **arquivos disjuntos** em
+  **faixas paralelas** — 1 faixa = 1 git worktree + 1 branch + 1 janela de
+  contexto limpa — e gera três artefatos em `.spec/features/<feature>/`:
+  - `plano-execucao.md` — faixas, ondas, gestão de branches/commits e gate;
+  - `executar-tarefas.sh` — executor headless: roda `claude -p` por faixa,
+    em paralelo, com `--model` e `--effort` já definidos por tarefa, mescla
+    as branches de volta, marca as tarefas e fecha com verify + audit;
+  - `plano-execucao.html` — visual do plano com o botão **"Executar todas as
+    tarefas em janelas limpas e paralelas"** (copia o comando do script).
+- **Apresente o plano ao usuário antes de executar**: resuma as faixas, diga
+  onde estão os três arquivos e ofereça as duas rotas — automática
+  (`bash .spec/features/<feature>/executar-tarefas.sh` ou o botão do html) ou
+  manual (você mesmo implementa faixa a faixa, seguindo branches e commits do
+  plano).
+- Mudou tasks.md ou a config (`paralelo` no onpspec.config.json)? **Regenere
+  o plano** — nunca edite os artefatos à mão.
+
+### 5. Executar
 
 - Espelhe as tarefas na lista de tarefas nativa e vá atualizando o status —
-  o usuário acompanha o progresso em tempo real.
+  o usuário acompanha o progresso em tempo real. No tasks.md mecânico, use
+  `onp-spec tarefa <feature> <T-xxx> <status>`.
 - `onp-spec scaffold <feature>` gera o esqueleto de teste **que falha** para
   cada critério de aceite sem teste — e também para cada princípio da
   constituição com `verificação(teste)` ainda sem tag. A definição de pronto
   nasce executável.
 - Implemente até os testes passarem. **1 tarefa = 1 commit atômico** (a
-  mensagem cita a tarefa: `T-003: ...`). Marque `[concluida]` só com prova
-  PASS.
+  mensagem cita a tarefa: `T-003 <feature>: ...`). Marque `[concluida]` só
+  com prova PASS.
 - Um teste por critério de aceite no mínimo; o teste assere o resultado da
   especificação, não o formato do seu código.
 
-### 5. Verificar e Auditar (o gate)
+### 6. Verificar e Auditar (o gate)
 
 - `onp-spec verify <feature>` — roda os testes, grava a prova por critério de
   aceite em `.spec/verification/<feature>.json`. Só PASS conta (skip não é
@@ -184,7 +211,7 @@ produto).
   escale ao usuário com os problemas ranqueados.
 - Fluxo completo com exemplo: [fluxo.md](references/fluxo.md).
 
-### 6. Aprender (fecha o ciclo)
+### 7. Aprender (fecha o ciclo)
 
 Depois que o audit sai 0: o caminho até aqui ficou registrado sozinho no
 histórico de sinais (todo problema de audit e toda falha/skip de verify).
@@ -239,6 +266,7 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
 - **"Que código não atende requisito nenhum?"** → código órfão
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
+- **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

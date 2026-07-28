@@ -11,6 +11,22 @@ critério de aceite precisa descrever algo que um teste consegue checar.
 | A senha deve ser segura | **Então** senhas com menos de 8 caracteres são rejeitadas |
 | O aluno vê suas notas | **Então** a resposta contém só as notas do aluno autenticado |
 
+## E precisa ser amigável — o dono do produto vai ler
+
+O critério de aceite é o contrato com quem NÃO programa. Escreva o título e o
+Então como **resultado que o usuário consegue ver e conferir**, não como
+detalhe interno:
+
+| Técnico demais | Amigável (e igualmente testável) |
+|---|---|
+| **Então** o endpoint retorna 403 | **Então** a tela avisa "você não tem acesso" (e a resposta é 403) |
+| **Então** o job grava no Redis | **Então** o aviso de atraso aparece em até 1 minuto |
+| AC-004 — flag `is_late` true | AC-004 — Entrega atrasada é sinalizada ao professor |
+
+Regra prática: leia o critério em voz alta para alguém de fora — se a pessoa
+não entende o que vai acontecer, reescreva. O detalhe técnico pode ficar entre
+parênteses; a frase principal é para gente.
+
 ## Dado / Quando / Então — os três são obrigatórios
 
 O audit acusa "critério de aceite incompleto" (`AC_INCOMPLETO`) se faltar
@@ -71,7 +87,14 @@ rascunho → pronta → em-implementacao → implementada → auditada
 - `Refs:` — códigos separados por vírgula/espaço. Códigos são GLOBAIS: uma
   tarefa pode referenciar critério de aceite de outra feature.
 - `Arquivos:` — caminhos separados por VÍRGULA (espaços dentro do caminho são
-  válidos): `Arquivos: src/meu modulo.js, src/outro.js`.
+  válidos): `Arquivos: src/meu modulo.js, src/outro.js`. Capriche aqui: é este
+  campo que decide o que o plano de execução roda EM PARALELO (arquivos
+  disjuntos) e o que roda em sequência (arquivo compartilhado).
+- `Modelo:` e `Esforço:` (opcionais) — usados por `onp-spec plano` para o
+  executor da tarefa: `- Modelo: claude-opus-5` · `- Esforço: alto`
+  (baixo|medio|alto|xalto|max). Sem eles, valem os defaults da config
+  (`paralelo.model`, `paralelo.esforco`).
 - Status: `[pendente]` / `[em-andamento]` / `[concluida]` — acentos e
   maiúsculas tolerados (`[Concluída]` conta); token fora da lista é "status de
   tarefa inválido" (`TASK_STATUS_INVALIDO`, erro), nunca ignorado em silêncio.
+  Para atualizar sem editar na mão: `onp-spec tarefa <feature> <T-xxx> <status>`.

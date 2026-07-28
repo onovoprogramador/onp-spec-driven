@@ -1,8 +1,11 @@
 // CLI onp-spec — dispatch de comandos.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, chmodSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml } from './core/plano.js';
+import { TASK_STATUSES } from './parsers/tasks.js';
+import { DASH, foldStatus } from './util/text.js';
 import { loadConfig, DEFAULT_CONFIG } from './config.js';
 import { loadProject } from './core/project.js';
 import { auditProject } from './core/audit.js';
@@ -26,7 +29,21 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 
 // Onde mora a skill: layout do repo (skills/onp-spec-driven) ou layout
-// embarcado (este arquivo em <skill>/scripts/lib/src → a skill é ../../..)
+// embarcado (este arquivo em <skill>/scripts/lib/src → a skill é ../../..).
+// O fallback embarcado só vale se a SKILL.md encontrada for DO agente pedido
+// (marcador `agent:` no frontmatter) — senão instalaríamos a skill errada
+// anunciando sucesso.
+function skillAgentMarker(dir) {
+  try {
+    const conteudo = readFileSync(path.join(dir, 'SKILL.md'), 'utf-8');
+    const frontmatter = conteudo.split(/^---\s*$/m)[1] || '';
+    const m = frontmatter.match(/^\s*agent:\s*(\S+)/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveSkillDir(agent = 'claude') {
   const dirName = agent === 'antigravity' ? 'onp-spec-driven-antigravity' : 'onp-spec-driven';
   const candidates = [
@@ -34,7 +51,10 @@ function resolveSkillDir(agent = 'claude') {
     path.join(__dirname, '..', '..', '..'),
   ];
   for (const dir of candidates) {
-    if (existsSync(path.join(dir, 'SKILL.md'))) return dir;
+    if (!existsSync(path.join(dir, 'SKILL.md'))) continue;
+    const marker = skillAgentMarker(dir);
+    if (marker && marker !== agent) continue; // skill de outro agente — não serve
+    return dir;
   }
   return null;
 }
@@ -44,9 +64,23 @@ const HELP = `onp-spec — spec-anchored development (a especificação que cont
 uso: onp-spec <comando> [opções]
 
 comandos:
-  init [--preset base|lgpd-educacao] [--agents claude]
+  init [--preset base|lgpd-educacao] [--agents claude|antigravity]
                       cria .spec/, constituição e config no diretório atual
+                      (--agents também instala a skill do agente escolhido)
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
+  plano <feature> [--agents claude|antigravity]
+                      plano de execução: agrupa tarefas em faixas PARALELAS
+                      (arquivos disjuntos → 1 worktree + 1 branch + 1 janela
+                      limpa por faixa) e gera os artefatos de execução
+                      · sempre: plano-execucao.md (faixas, branches, commits)
+                      · claude: executar-tarefas.sh (claude -p headless com
+                        --model/--effort por tarefa) + plano-execucao.html
+                        (visual, botão "Executar todas as tarefas...")
+                      · antigravity: prompts prontos por faixa p/ os agentes
+                        paralelos nativos (não depende do CLI do Claude)
+  tarefa <feature> <T-xxx> <status>
+                      atualiza o status da tarefa no tasks.md
+                      (pendente | em-andamento | concluida)
   audit [--ci] [--json] [--md <arquivo>]
                       audita especificação ↔ tarefas ↔ testes ↔ código ↔ constituição
                       exit 1 se houver erro (use no CI)
@@ -68,7 +102,8 @@ fluxo típico:
   onp-spec init --preset lgpd-educacao
   onp-spec new entrega-dever-casa      # escreva histórias, critérios, suposições e perguntas
   onp-spec scaffold entrega-dever-casa # cada critério vira um teste que falha
-  ... implemente até os testes passarem ...
+  onp-spec plano entrega-dever-casa    # tarefas em faixas paralelas + artefatos de execução
+  ... execute o plano (ou implemente à mão) até os testes passarem ...
   onp-spec verify entrega-dever-casa   # o test runner grava a prova
   onp-spec audit --ci                  # 0 = especificação e código alinhados`;
 
@@ -138,27 +173,25 @@ function cmdInit(rootDir, flags) {
   const gitignorePath = path.join(specRoot, 'verification', '.gitkeep');
   if (!existsSync(gitignorePath)) writeFileSync(gitignorePath, '');
 
-  if (flags.agents === 'claude' || flags.agents === true) {
-    const dest = path.join(rootDir, '.claude', 'skills', 'onp-spec-driven');
-    const skillDir = resolveSkillDir('claude');
-    if (!skillDir) {
-      console.log('· skill não encontrada junto ao motor — nada a instalar');
-    } else if (path.resolve(dest) === path.resolve(skillDir)) {
-      console.log('· skill já instalada em .claude/skills/onp-spec-driven — mantida');
-    } else {
-      copyDirIfExists(skillDir, dest);
-      console.log('✔ skill instalada em .claude/skills/onp-spec-driven (Claude Code)');
+  if (flags.agents !== undefined) {
+    const agent = flags.agents === true ? 'claude' : flags.agents;
+    if (agent !== 'claude' && agent !== 'antigravity') {
+      console.error(`--agents desconhecido: "${flags.agents}" (use: claude, antigravity)`);
+      return 2;
     }
-  } else if (flags.agents === 'antigravity') {
-    const dest = path.join(rootDir, '.agents', 'skills', 'onp-spec-driven');
-    const skillDir = resolveSkillDir('antigravity');
+    const rotulo = agent === 'claude' ? 'Claude Code' : 'Antigravity';
+    const destRel = path.join(agent === 'claude' ? '.claude' : '.agents', 'skills', 'onp-spec-driven');
+    const dest = path.join(rootDir, destRel);
+    const skillDir = resolveSkillDir(agent);
     if (!skillDir) {
-      console.log('· skill não encontrada junto ao motor — nada a instalar');
+      console.log(
+        `· skill para ${rotulo} não encontrada junto a este motor — instale com: npx @onovoprogramador/onp-spec init --agents ${agent}`
+      );
     } else if (path.resolve(dest) === path.resolve(skillDir)) {
-      console.log('· skill já instalada em .agents/skills/onp-spec-driven — mantida');
+      console.log(`· skill já instalada em ${destRel} — mantida`);
     } else {
       copyDirIfExists(skillDir, dest);
-      console.log('✔ skill instalada em .agents/skills/onp-spec-driven (Antigravity)');
+      console.log(`✔ skill instalada em ${destRel} (${rotulo})`);
     }
   }
 
@@ -223,6 +256,105 @@ function cmdNew(rootDir, name, flags) {
   console.log(`     e PREENCHA as seções Suposições e Perguntas em aberto`);
   console.log(`  2. onp-spec scaffold ${name}   # cada critério vira um teste executável`);
   console.log(`  3. onp-spec audit              # veja o que falta`);
+  console.log(`  4. onp-spec plano ${name}      # com as tarefas escritas: plano de execução paralela`);
+  return 0;
+}
+
+// Detecta para qual agente gerar os artefatos do plano: flag explícita vence;
+// senão, o próprio caminho do motor embarcado denuncia (.claude/ vs .agents/);
+// senão, o que estiver instalado no projeto; default: claude.
+function detectarAgente(rootDir, flag) {
+  if (flag !== undefined && flag !== true) {
+    if (flag !== 'claude' && flag !== 'antigravity') return { erro: `--agents desconhecido: "${flag}" (use: claude, antigravity)` };
+    return { agent: flag };
+  }
+  const segmentos = __dirname.split(path.sep);
+  if (segmentos.includes('.agents')) return { agent: 'antigravity' };
+  if (segmentos.includes('.claude')) return { agent: 'claude' };
+  const temAg = existsSync(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
+  const temClaude = existsSync(path.join(rootDir, '.claude', 'skills', 'onp-spec-driven'));
+  if (temAg && !temClaude) return { agent: 'antigravity' };
+  return { agent: 'claude' };
+}
+
+function cmdPlano(project, positional, flags) {
+  const featureName = positional[0];
+  if (!featureName) {
+    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity]');
+    return 2;
+  }
+  const det = detectarAgente(project.config.rootDir, flags.agents);
+  if (det.erro) {
+    console.error(det.erro);
+    return 2;
+  }
+  const plan = montarPlano(project, featureName, {
+    agent: det.agent,
+    enginePath: process.argv[1],
+  });
+  if (plan.erro) {
+    console.error(`erro: ${plan.erro}`);
+    return 2;
+  }
+
+  const dir = path.join(project.config.rootDir, plan.baseDir);
+  writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
+  const gerados = [`${plan.baseDir}/plano-execucao.md`];
+  if (plan.agent === 'claude') {
+    const sh = path.join(dir, 'executar-tarefas.sh');
+    writeFileSync(sh, renderPlanoSh(plan));
+    chmodSync(sh, 0o755);
+    writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
+    gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
+  }
+
+  const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
+  console.log(
+    `✔ plano de execução (${det.agent}): ${paralelas + plan.sequenciais.length} tarefa(s) — ` +
+      `${paralelas} em ${plan.faixas.length} faixa(s) paralela(s) · ${plan.sequenciais.length} sequencial(is) · ${plan.ondas.length} onda(s)`
+  );
+  console.log('\nonde está cada coisa:');
+  console.log(`  · plano (leia primeiro): ${gerados[0]}`);
+  if (plan.agent === 'claude') {
+    console.log(`  · executor headless:     ${gerados[1]}`);
+    console.log(`  · visual com botão:      ${gerados[2]}`);
+  }
+  for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
+  console.log('\npróximo passo:');
+  if (plan.agent === 'claude') {
+    console.log(`  bash ${plan.baseDir}/executar-tarefas.sh`);
+    console.log(`  (ou abra o plano-execucao.html e use o botão — ele copia esse comando)`);
+  } else {
+    console.log(`  abra um agente novo (janela limpa) por faixa e cole o prompt correspondente`);
+    console.log(`  do plano-execucao.md — depois merge + verify + audit, como descrito lá`);
+  }
+  return 0;
+}
+
+function cmdTarefa(config, positional) {
+  const [featureName, taskId, statusRaw] = positional;
+  if (!featureName || !taskId || !statusRaw) {
+    console.error('uso: onp-spec tarefa <feature> <T-xxx> <pendente|em-andamento|concluida>');
+    return 2;
+  }
+  const status = foldStatus(statusRaw);
+  if (!TASK_STATUSES.includes(status)) {
+    console.error(`status inválido: "${statusRaw}" (use: ${TASK_STATUSES.join(', ')})`);
+    return 2;
+  }
+  const tasksPath = path.join(config.rootDir, config.specDir, 'features', featureName, 'tasks.md');
+  if (!existsSync(tasksPath)) {
+    console.error(`não achei ${config.specDir}/features/${featureName}/tasks.md`);
+    return 2;
+  }
+  const conteudo = readFileSync(tasksPath, 'utf-8');
+  const re = new RegExp(`^(##\\s+${taskId}\\s*${DASH}\\s*.*?)(\\s*\\[[^\\]]+\\])?\\s*$`, 'm');
+  if (!re.test(conteudo)) {
+    console.error(`tarefa ${taskId} não encontrada em ${config.specDir}/features/${featureName}/tasks.md`);
+    return 2;
+  }
+  writeFileSync(tasksPath, conteudo.replace(re, `$1 [${status}]`));
+  console.log(`✔ ${taskId} → [${status}] em ${config.specDir}/features/${featureName}/tasks.md`);
   return 0;
 }
 
@@ -459,9 +591,7 @@ export async function run(argv) {
     return 0;
   }
 
-  if (command === 'init') {
-    return cmdInit(rootDir, { preset: flags.preset, agents: flags.agents });
-  }
+  if (command === 'init') return cmdInit(rootDir, flags);
   if (command === 'new') return cmdNew(rootDir, positional[0], flags);
 
   const config = loadConfig(rootDir);
@@ -469,8 +599,12 @@ export async function run(argv) {
   // lições não precisam do projeto carregado — em repos grandes, listar o
   // guia no início do Especificar tem que ser barato
   if (command === 'licoes') return cmdLicoes(config, positional, flags);
+  // tarefa idem: edição pontual de status no tasks.md (usada pelo executor)
+  if (command === 'tarefa') return cmdTarefa(config, positional);
 
   const project = loadProject(config);
+
+  if (command === 'plano') return cmdPlano(project, positional, flags);
 
   if (command === 'audit') {
     const audit = auditProject(project, { ci: Boolean(flags.ci) });
