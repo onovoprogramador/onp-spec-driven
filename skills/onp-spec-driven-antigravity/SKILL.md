@@ -4,7 +4,7 @@ description: Desenvolvimento spec-anchored nativo para Antigravity — a especif
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.1.0
+  version: 3.2.0
   agent: antigravity
 ---
 
@@ -95,7 +95,8 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 ```
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
-`plano <feature> [--agents antigravity]` · `tarefa <feature> <T-xxx> <status>` ·
+`plano <feature> [--agents antigravity]` · `painel <feature> [--porta N] [--sem-abrir]` ·
+`tarefa <feature> <T-xxx> <status>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
 `audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
 `licoes <add|list|sugerir|penalizar|status>`.
@@ -177,6 +178,10 @@ listas no plano.
   Campos opcionais por tarefa: `Modelo:` e `Esforço:` (baixo|medio|alto|xalto|max).
 - **Visualização depois:** espelhe as tarefas no Artifact de lista de tarefas
   do Antigravity para o acompanhamento `[ ]`/`[/]`/`[x]`.
+- **Fechou o tasks.md? Anuncie o paralelismo.** Rode `onp-spec plano <feature>`
+  e conte ao usuário, sem ele pedir: *"X destas Y tarefas podem rodar EM
+  PARALELO, em N faixas — quer que eu monte a execução? Dá para acompanhar
+  ao vivo no navegador."* Nunca deixe o paralelismo como segredo do motor.
 
 ### 4. Plano de execução (2+ tarefas pendentes)
 
@@ -192,6 +197,11 @@ listas no plano.
   por faixa (janela limpa), cada um no seu worktree, com o prompt do plano.
   Esta skill NUNCA depende do CLI do Claude — isso é da skill irmã do Claude
   Code.
+- **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
+  em background (terminal) e entregue a URL — um painel local no navegador
+  refletindo em tempo real o tasks.md, as provas do verify e o gate enquanto
+  os agentes das faixas trabalham. No Antigravity o painel é modo
+  acompanhamento (quem executa são os agentes nativos, não o botão).
 - Feature pequena ou usuário quer simples? Execute as faixas você mesmo, em
   sequência — o plano continua valendo como roteiro de branches e commits.
 
@@ -274,6 +284,7 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
 - **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
+- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>`.
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

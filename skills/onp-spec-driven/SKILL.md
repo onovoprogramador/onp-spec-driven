@@ -4,7 +4,7 @@ description: Desenvolvimento spec-anchored — a especificação continua verdad
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.1.0
+  version: 3.2.0
   agent: claude
 ---
 
@@ -82,7 +82,8 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 ```
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
-`plano <feature> [--agents claude]` · `tarefa <feature> <T-xxx> <status>` ·
+`plano <feature> [--agents claude]` · `painel <feature> [--porta N] [--sem-abrir]` ·
+`tarefa <feature> <T-xxx> <status>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
 `audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
 `licoes <add|list|sugerir|penalizar|status>`.
@@ -164,6 +165,10 @@ produto).
   `Esforço:` (baixo|medio|alto|xalto|max) — o plano de execução usa os dois.
 - Status entre colchetes: `[pendente]`, `[em-andamento]`, `[concluida]`
   (acentos e maiúsculas são tolerados; token desconhecido é erro).
+- **Fechou o tasks.md? Anuncie o paralelismo.** Rode `onp-spec plano <feature>`
+  e conte ao usuário, sem ele pedir: *"X destas Y tarefas podem rodar EM
+  PARALELO, em N faixas — quer que eu execute? Dá para acompanhar tudo ao
+  vivo no navegador."* Nunca deixe o paralelismo como segredo do motor.
 
 ### 4. Plano de execução (2+ tarefas pendentes)
 
@@ -177,10 +182,16 @@ produto).
   - `plano-execucao.html` — visual do plano com o botão **"Executar todas as
     tarefas em janelas limpas e paralelas"** (copia o comando do script).
 - **Apresente o plano ao usuário antes de executar**: resuma as faixas, diga
-  onde estão os três arquivos e ofereça as duas rotas — automática
+  onde estão os arquivos e ofereça as rotas — automática
   (`bash .spec/features/<feature>/executar-tarefas.sh` ou o botão do html) ou
   manual (você mesmo implementa faixa a faixa, seguindo branches e commits do
   plano).
+- **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
+  em background (Bash com run_in_background) e entregue a URL ao usuário —
+  abre um painel local no navegador com as faixas em tempo real, o log de
+  cada janela rolando, as provas e o gate; o botão **"Executar todas as
+  tarefas em janelas limpas e paralelas"** de lá dispara o script DE VERDADE.
+  É assim que o usuário acompanha sem digitar comando nenhum.
 - Mudou tasks.md ou a config (`paralelo` no onpspec.config.json)? **Regenere
   o plano** — nunca edite os artefatos à mão.
 
@@ -267,6 +278,7 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
 - **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
+- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>`.
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

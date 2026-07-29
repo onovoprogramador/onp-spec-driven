@@ -217,6 +217,43 @@ export function promptFaixa(plan, fx, { worktree = true } = {}) {
   ].join('\n');
 }
 
+// ── artefato: plano.json (leitura de máquina — alimenta o painel ao vivo) ──
+
+export function renderPlanoJson(plan) {
+  const tarefa = (t) => ({
+    id: t.id,
+    titulo: t.title,
+    modelo: t.model,
+    esforco: t.esforcoCli,
+    arquivos: t.files,
+    refs: t.refs,
+  });
+  return `${JSON.stringify(
+    {
+      feature: plan.feature,
+      agent: plan.agent,
+      geradoEm: plan.geradoEm,
+      branchTrabalho: plan.branchTrabalho,
+      baseDir: plan.baseDir,
+      specDir: plan.specDir,
+      repoName: plan.repoName,
+      logsDir: `../onp-worktrees/${plan.repoName}-${plan.feature}-logs`,
+      ondas: plan.ondas.map((onda) => onda.map((fx) => fx.id)),
+      faixas: plan.faixas.map((fx) => ({
+        id: fx.id,
+        branch: fx.branch,
+        worktree: fx.worktree,
+        tarefas: fx.tasks.map(tarefa),
+      })),
+      sequenciais: plan.sequenciais.map(tarefa),
+      concluidas: plan.concluidas.map((t) => t.id),
+      avisos: plan.avisos,
+    },
+    null,
+    2
+  )}\n`;
+}
+
 // ── artefato: plano-execucao.md ────────────────────────────────────────────
 
 function tabelaFaixa(plan, fx) {
@@ -296,6 +333,17 @@ export function renderPlanoMd(plan) {
     L.push(`definidos por tarefa, permissões \`${plan.cfg.permissionMode}\`. Os prompts exatos estão`);
     L.push('embutidos no script — quer rodar uma faixa na mão, é só copiá-los de lá.');
     L.push(`Logs: \`../onp-worktrees/${plan.repoName}-${plan.feature}-logs/\`.`);
+    L.push('');
+    L.push('### 👀 Acompanhe ao vivo, sem digitar comandos');
+    L.push('');
+    L.push('```bash');
+    L.push(`onp-spec painel ${plan.feature}`);
+    L.push('```');
+    L.push('');
+    L.push('Abre um painel no navegador com as faixas em tempo real, o log de cada uma');
+    L.push('rolando ao vivo, o veredito do gate — e o botão **"Executar todas as tarefas');
+    L.push('em janelas limpas e paralelas"** que aqui executa DE VERDADE (o servidor é');
+    L.push('local, então pode disparar o script por você).');
   } else {
     L.push('### ▶ Paralelo nativo no Antigravity (janelas limpas, sem Claude CLI)');
     L.push('');
@@ -347,6 +395,10 @@ export function renderPlanoMd(plan) {
     L.push(`node ${plan.engine} verify ${plan.feature}`);
     L.push(`node ${plan.engine} audit --ci`);
     L.push('```');
+    L.push('');
+    L.push(`6. **Acompanhe ao vivo** (opcional): \`onp-spec painel ${plan.feature}\` abre um`);
+    L.push('   painel no navegador refletindo tasks.md, as provas do verify e o gate em');
+    L.push('   tempo real enquanto os agentes trabalham — sem digitar mais nada.');
   }
   L.push('');
   return `${L.join('\n')}\n`;
@@ -394,6 +446,8 @@ export function renderPlanoSh(plan) {
   L.push(`vermelho() { printf '\\033[31m%s\\033[0m\\n' "$*"; }`);
   L.push(`info()     { printf '· %s\\n' "$*"; }`);
   L.push('falhar()   { vermelho "✘ $*"; exit 1; }');
+  L.push('# trilha de eventos para o painel ao vivo (`onp-spec painel <feature>`)');
+  L.push(`evento()   { [ -n "\${EVENTOS:-}" ] && printf '%s|%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$EVENTOS"; }`);
   L.push('');
   L.push('# ── 1. ambiente ──────────────────────────────────────────────────');
   L.push('command -v git >/dev/null 2>&1 || falhar "git não encontrado"');
@@ -404,7 +458,7 @@ export function renderPlanoSh(plan) {
   L.push('# artefatos recém-gerados pelo `onp-spec plano` são sujeira esperada:');
   L.push('# se forem a ÚNICA sujeira, o script mesmo commita; qualquer outra, aborta');
   L.push('if [ -n "$(git status --porcelain)" ]; then');
-  L.push(`  if [ -z "$(git status --porcelain | grep -v -e 'plano-execucao\\.' -e 'executar-tarefas\\.sh')" ]; then`);
+  L.push(`  if [ -z "$(git status --porcelain | grep -v -e 'plano-execucao\\.' -e 'plano\\.json' -e 'executar-tarefas\\.sh')" ]; then`);
   L.push('    git add -A');
   L.push('    git commit -q -m "plano de execução: $FEATURE (artefatos gerados)"');
   L.push('    info "artefatos do plano commitados"');
@@ -428,19 +482,26 @@ export function renderPlanoSh(plan) {
   L.push('git worktree prune');
   L.push(`LOG_DIR="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}-logs"`);
   L.push('mkdir -p "$LOG_DIR"');
+  L.push('EVENTOS="$LOG_DIR/plano-eventos.log"');
+  L.push(': > "$EVENTOS"');
+  L.push('evento "inicio|$FEATURE"');
   L.push('info "logs por faixa em: $LOG_DIR"');
+  L.push(`info "acompanhe ao vivo: onp-spec painel ${plan.feature}"`);
   L.push('');
   L.push('mesclar_faixa() { # $1=faixa $2=branch $3=worktree $4=exit-da-faixa');
   L.push('  if [ "$4" -ne 0 ]; then');
+  L.push('    evento "faixa|$1|falhou"');
   L.push('    vermelho "✘ $1 falhou (log: $LOG_DIR/$1.log) — worktree mantido para inspeção: $3"');
   L.push('    FALHAS="$FALHAS $1"; return 1');
   L.push('  fi');
   L.push('  if git merge --no-ff "$2" -m "merge $1 ($FEATURE)"; then');
   L.push('    git worktree remove --force "$3" >/dev/null 2>&1');
   L.push('    git branch -d "$2" >/dev/null 2>&1');
+  L.push('    evento "faixa|$1|mesclada"');
   L.push('    verde "✔ $1 mesclada em $BASE_BRANCH"');
   L.push('  else');
   L.push('    git merge --abort >/dev/null 2>&1');
+  L.push('    evento "faixa|$1|conflito"');
   L.push('    vermelho "✘ conflito ao mesclar $1 — resolva na mão: git merge $2 (worktree mantido: $3)"');
   L.push('    FALHAS="$FALHAS $1"; return 1');
   L.push('  fi');
@@ -449,11 +510,13 @@ export function renderPlanoSh(plan) {
   plan.ondas.forEach((onda, oi) => {
     L.push('');
     L.push(`# ── onda ${oi + 1}: ${onda.map((fx) => `${fx.id} (${fx.tasks.map((t) => t.id).join(', ')})`).join(' ∥ ')} ──`);
+    L.push(`evento "onda|${oi + 1}|inicio"`);
     L.push(`info "onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')} — janelas limpas em paralelo"`);
     for (const fx of onda) {
       const wt = `WT_${fx.id.replace('-', '_').toUpperCase()}`;
       L.push(`${wt}="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}-${fx.id}"`);
       L.push(`git worktree add "$${wt}" -b ${shq(fx.branch)} >/dev/null || falhar "worktree da ${fx.id} (sobrou de uma execução anterior? git worktree prune + apague ${fx.worktree})"`);
+      L.push(`evento "faixa|${fx.id}|executando"`);
       L.push('(');
       L.push(`  cd "$${wt}" || exit 9`);
       fx.tasks.forEach((t, ti) => {
@@ -467,12 +530,14 @@ export function renderPlanoSh(plan) {
     for (const fx of onda) {
       const up = fx.id.replace('-', '_').toUpperCase();
       L.push(`wait "$PID_${up}"; ST_${up}=$?`);
+      L.push(`evento "faixa|${fx.id}|exit|$ST_${up}"`);
     }
     for (const fx of onda) {
       const up = fx.id.replace('-', '_').toUpperCase();
       L.push(`if mesclar_faixa ${shq(fx.id)} ${shq(fx.branch)} "$WT_${up}" "$ST_${up}"; then`);
       for (const t of fx.tasks) {
         L.push(`  node "$ENGINE" tarefa "$FEATURE" ${t.id} concluida || true`);
+        L.push(`  evento "tarefa|${t.id}|concluida"`);
       }
       L.push('fi');
     }
@@ -483,14 +548,17 @@ export function renderPlanoSh(plan) {
     L.push('# ── tarefas sequenciais (árvore principal) ───────────────────────');
     for (const t of plan.sequenciais) {
       L.push(`info ${shq(`sequencial ${t.id} — ${t.title}`)} "(log: $LOG_DIR/${t.id}.log)"`);
+      L.push(`evento "seq|${t.id}|executando"`);
       L.push(`if ${chamadaClaude(plan, t)} > "$LOG_DIR/${t.id}.log" 2>&1; then`);
       L.push('  # commit de segurança se o agente esqueceu (rastreabilidade > perfeição)');
       L.push('  if [ -n "$(git status --porcelain)" ]; then');
       L.push(`    git add -A && git commit -q -m ${shq(`${t.id} ${plan.feature}: ${t.title} (auto-commit do plano)`)}`);
       L.push('  fi');
       L.push(`  node "$ENGINE" tarefa "$FEATURE" ${t.id} concluida || true`);
+      L.push(`  evento "seq|${t.id}|concluida"`);
       L.push(`  verde "✔ ${t.id} concluída"`);
       L.push('else');
+      L.push(`  evento "seq|${t.id}|falhou"`);
       L.push(`  vermelho "✘ ${t.id} falhou (log: $LOG_DIR/${t.id}.log)"; FALHAS="$FALHAS ${t.id}"`);
       L.push('fi');
     }
@@ -500,9 +568,12 @@ export function renderPlanoSh(plan) {
   L.push('# ── gate final: quem decide é a máquina ──────────────────────────');
   L.push('echo');
   L.push('info "gate final: verify + audit --ci"');
+  L.push('evento "gate|inicio"');
   L.push('node "$ENGINE" verify "$FEATURE"');
+  L.push('evento "gate|verify|$?"');
   L.push('node "$ENGINE" audit --ci');
   L.push('AUDIT=$?');
+  L.push('evento "gate|audit|$AUDIT"');
   L.push('# fecha a contabilidade: status das tarefas + prova do verify no git');
   L.push(`if [ -n "$(git status --porcelain -- ${shq(plan.specDir)})" ]; then`);
   L.push(`  git add -A -- ${shq(plan.specDir)}`);
@@ -512,10 +583,12 @@ export function renderPlanoSh(plan) {
   L.push('echo');
   L.push('if [ -n "$FALHAS" ]; then vermelho "faixas/tarefas com falha:$FALHAS"; fi');
   L.push('if [ "$AUDIT" -eq 0 ] && [ -z "$FALHAS" ]; then');
+  L.push('  evento "fim|0"');
   L.push('  verde "✔ plano concluído — especificação e código alinhados (audit exit 0) na branch $BASE_BRANCH"');
   L.push('  info "próximo passo: revise e leve para a main quando quiser (git merge $BASE_BRANCH)"');
   L.push('  exit 0');
   L.push('fi');
+  L.push('evento "fim|1"');
   L.push('vermelho "plano terminou com pendências — leia a saída do audit acima e os logs em $LOG_DIR"');
   L.push('exit 1');
   return `${L.join('\n')}\n`;
@@ -617,9 +690,11 @@ export function renderPlanoHtml(plan) {
     <button onclick="copiar()">▶ Executar todas as tarefas em janelas limpas e paralelas</button>
     <span id="toast">comando copiado ✔ — cole no terminal</span>
     <div><code id="cmd">${esc(cmd)}</code></div>
-    <p class="nota">O navegador não pode iniciar processos: o botão copia o comando; cole no
-    terminal, na raiz do projeto. Cada faixa roda <code>claude -p</code> num worktree próprio,
-    com contexto limpo, modelo e esforço já definidos. O gate final (verify + audit) roda sozinho.</p>
+    <p class="nota">Este arquivo é estático: o botão copia o comando; cole no terminal, na raiz
+    do projeto. Cada faixa roda <code>claude -p</code> num worktree próprio, com contexto limpo,
+    modelo e esforço já definidos. O gate final (verify + audit) roda sozinho.
+    <b>Quer acompanhar ao vivo e executar com um clique de verdade?</b> Rode
+    <code>onp-spec painel ${esc(plan.feature)}</code> — abre a versão viva deste painel.</p>
   </div>
   ${ondasHtml}
   ${seqHtml}

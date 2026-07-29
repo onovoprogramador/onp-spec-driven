@@ -171,6 +171,22 @@ test('sh: claude -p com model/effort por tarefa, worktrees, merge e gate final',
   assert.match(sh, /audit --ci/);
   // tarefa sem arquivos roda sequencial na árvore principal
   assert.match(sh, /sequencial T-003/);
+  // trilha de eventos para o painel ao vivo
+  assert.match(sh, /plano-eventos\.log/);
+  assert.match(sh, /evento "faixa\|faixa-1\|executando"/);
+  assert.match(sh, /evento "gate\|audit\|\$AUDIT"/);
+  assert.match(sh, /evento "fim\|0"/);
+});
+
+test('plano.json: estrutura de máquina para o painel e outras ferramentas', async () => {
+  const { renderPlanoJson } = await import('../src/core/plano.js');
+  const dados = JSON.parse(renderPlanoJson(planPadrao('claude')));
+  assert.equal(dados.feature, 'pagamentos');
+  assert.deepEqual(dados.ondas, [['faixa-1', 'faixa-2']]);
+  assert.equal(dados.faixas[0].tarefas[0].id, 'T-001');
+  assert.equal(dados.faixas[0].tarefas[0].esforco, 'medium');
+  assert.equal(dados.sequenciais[0].id, 'T-003');
+  assert.match(dados.logsDir, /onp-worktrees\/repo-x-pagamentos-logs/);
 });
 
 test('html: botão, comando, tema e escape de conteúdo hostil', () => {

@@ -119,8 +119,9 @@ test('plano (claude): gera md + sh executável com bash válido + html com botã
 
   const { code, out } = cli('plano', 'pagamentos', '--agents', 'claude');
   assert.equal(code, 0, out);
-  assert.match(out, /2 faixa\(s\) paralela\(s\)/);
+  assert.match(out, /PODEM RODAR EM PARALELO em 2 faixa\(s\)/);
   assert.match(out, /onde está cada coisa/);
+  assert.match(out, /onp-spec painel pagamentos/);
 
   const md = readFileSync(path.join(dir, 'plano-execucao.md'), 'utf-8');
   assert.match(md, /faixa-1/);
@@ -136,6 +137,10 @@ test('plano (claude): gera md + sh executável com bash válido + html com botã
 
   const html = readFileSync(path.join(dir, 'plano-execucao.html'), 'utf-8');
   assert.match(html, /Executar todas as tarefas em janelas limpas e paralelas/);
+
+  const planoJson = JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8'));
+  assert.equal(planoJson.agent, 'claude');
+  assert.equal(planoJson.faixas.length, 2);
 });
 
 test('plano (antigravity): md com prompts por faixa, sem sh/html novos e sem claude -p', () => {
@@ -152,6 +157,7 @@ test('plano (antigravity): md com prompts por faixa, sem sh/html novos e sem cla
   assert.doesNotMatch(md, /claude -p/);
   assert.ok(!existsSync(path.join(dir, 'executar-tarefas.sh')), 'antigravity não gera o sh');
   assert.ok(!existsSync(path.join(dir, 'plano-execucao.html')), 'antigravity não gera o html');
+  assert.equal(JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8')).agent, 'antigravity');
 });
 
 test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {

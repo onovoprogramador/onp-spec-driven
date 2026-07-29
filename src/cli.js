@@ -3,7 +3,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, chmodSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml } from './core/plano.js';
+import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml, renderPlanoJson } from './core/plano.js';
+import { servirPainel } from './core/painel.js';
 import { TASK_STATUSES } from './parsers/tasks.js';
 import { DASH, foldStatus } from './util/text.js';
 import { loadConfig, DEFAULT_CONFIG } from './config.js';
@@ -78,6 +79,11 @@ comandos:
                         (visual, botão "Executar todas as tarefas...")
                       · antigravity: prompts prontos por faixa p/ os agentes
                         paralelos nativos (não depende do CLI do Claude)
+  painel <feature> [--porta N] [--sem-abrir]
+                      painel AO VIVO no navegador (servidor local, zero deps,
+                      só 127.0.0.1): faixas em tempo real, logs rolando, gate
+                      — e o botão "Executar todas as tarefas..." que executa
+                      de verdade. Acompanhe sem digitar mais nada.
   tarefa <feature> <T-xxx> <status>
                       atualiza o status da tarefa no tasks.md
                       (pendente | em-andamento | concluida)
@@ -277,6 +283,24 @@ function detectarAgente(rootDir, flag) {
   return { agent: 'claude' };
 }
 
+function gerarArtefatosPlano(project, featureName, agent) {
+  const plan = montarPlano(project, featureName, { agent, enginePath: process.argv[1] });
+  if (plan.erro) return plan;
+  const dir = path.join(project.config.rootDir, plan.baseDir);
+  writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
+  writeFileSync(path.join(dir, 'plano.json'), renderPlanoJson(plan));
+  const gerados = [`${plan.baseDir}/plano-execucao.md`, `${plan.baseDir}/plano.json`];
+  if (plan.agent === 'claude') {
+    const sh = path.join(dir, 'executar-tarefas.sh');
+    writeFileSync(sh, renderPlanoSh(plan));
+    chmodSync(sh, 0o755);
+    writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
+    gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
+  }
+  plan.gerados = gerados;
+  return plan;
+}
+
 function cmdPlano(project, positional, flags) {
   const featureName = positional[0];
   if (!featureName) {
@@ -288,47 +312,78 @@ function cmdPlano(project, positional, flags) {
     console.error(det.erro);
     return 2;
   }
-  const plan = montarPlano(project, featureName, {
-    agent: det.agent,
-    enginePath: process.argv[1],
-  });
+  const plan = gerarArtefatosPlano(project, featureName, det.agent);
   if (plan.erro) {
     console.error(`erro: ${plan.erro}`);
     return 2;
   }
 
-  const dir = path.join(project.config.rootDir, plan.baseDir);
-  writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
-  const gerados = [`${plan.baseDir}/plano-execucao.md`];
-  if (plan.agent === 'claude') {
-    const sh = path.join(dir, 'executar-tarefas.sh');
-    writeFileSync(sh, renderPlanoSh(plan));
-    chmodSync(sh, 0o755);
-    writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
-    gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
-  }
-
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
   console.log(
     `✔ plano de execução (${det.agent}): ${paralelas + plan.sequenciais.length} tarefa(s) — ` +
-      `${paralelas} em ${plan.faixas.length} faixa(s) paralela(s) · ${plan.sequenciais.length} sequencial(is) · ${plan.ondas.length} onda(s)`
+      `${paralelas} PODEM RODAR EM PARALELO em ${plan.faixas.length} faixa(s) · ${plan.sequenciais.length} sequencial(is) · ${plan.ondas.length} onda(s)`
   );
   console.log('\nonde está cada coisa:');
-  console.log(`  · plano (leia primeiro): ${gerados[0]}`);
+  console.log(`  · plano (leia primeiro): ${plan.gerados[0]}`);
   if (plan.agent === 'claude') {
-    console.log(`  · executor headless:     ${gerados[1]}`);
-    console.log(`  · visual com botão:      ${gerados[2]}`);
+    console.log(`  · executor headless:     ${plan.baseDir}/executar-tarefas.sh`);
+    console.log(`  · visual com botão:      ${plan.baseDir}/plano-execucao.html`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
-  console.log('\npróximo passo:');
+  console.log('\npróximo passo (escolha um):');
+  console.log(`  · acompanhar AO VIVO e executar com um clique: onp-spec painel ${featureName}`);
   if (plan.agent === 'claude') {
-    console.log(`  bash ${plan.baseDir}/executar-tarefas.sh`);
-    console.log(`  (ou abra o plano-execucao.html e use o botão — ele copia esse comando)`);
+    console.log(`  · direto no terminal: bash ${plan.baseDir}/executar-tarefas.sh`);
   } else {
-    console.log(`  abra um agente novo (janela limpa) por faixa e cole o prompt correspondente`);
-    console.log(`  do plano-execucao.md — depois merge + verify + audit, como descrito lá`);
+    console.log(`  · abra um agente novo (janela limpa) por faixa e cole o prompt correspondente`);
+    console.log(`    do plano-execucao.md — depois merge + verify + audit, como descrito lá`);
   }
   return 0;
+}
+
+async function cmdPainel(project, positional, flags) {
+  const featureName = positional[0];
+  if (!featureName) {
+    console.error('uso: onp-spec painel <feature> [--porta N] [--sem-abrir]');
+    return 2;
+  }
+  const det = detectarAgente(project.config.rootDir, flags.agents);
+  if (det.erro) {
+    console.error(det.erro);
+    return 2;
+  }
+  const planoPath = path.join(
+    project.config.rootDir,
+    project.config.specDir,
+    'features',
+    featureName,
+    'plano.json'
+  );
+  let agent = det.agent;
+  if (!existsSync(planoPath)) {
+    const plan = gerarArtefatosPlano(project, featureName, det.agent);
+    if (plan.erro) {
+      console.error(`erro: ${plan.erro}`);
+      return 2;
+    }
+    console.log(`· plano ainda não existia — gerado agora (${plan.gerados.join(', ')})`);
+  } else {
+    try {
+      agent = JSON.parse(readFileSync(planoPath, 'utf-8')).agent || det.agent;
+    } catch {
+      // plano.json corrompido — o estado vai reportar o erro no navegador
+    }
+  }
+  await servirPainel({
+    rootDir: project.config.rootDir,
+    specDir: project.config.specDir,
+    feature: featureName,
+    agent,
+    porta: parseInt(flags.porta, 10) || 4747,
+    abrir: !flags['sem-abrir'],
+  });
+  // mantém o processo vivo até Ctrl+C — o servidor é a sessão
+  return new Promise(() => {});
 }
 
 function cmdTarefa(config, positional) {
@@ -605,6 +660,7 @@ export async function run(argv) {
   const project = loadProject(config);
 
   if (command === 'plano') return cmdPlano(project, positional, flags);
+  if (command === 'painel') return cmdPainel(project, positional, flags);
 
   if (command === 'audit') {
     const audit = auditProject(project, { ci: Boolean(flags.ci) });

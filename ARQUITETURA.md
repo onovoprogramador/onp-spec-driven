@@ -192,6 +192,22 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
 `onp-spec tarefa <feature> <T-xxx> <status>` é o utilitário mecânico de
 atualização de status usado pelo executor (e por humanos).
 
+O plano também sai em `plano.json` (leitura de máquina) e o script emite uma
+trilha de eventos (`<logs>/plano-eventos.log`: faixa executando/mesclada/
+conflito, tarefas, gate, fim) — é o que alimenta o painel.
+
+## Painel ao vivo (src/core/painel.js)
+
+`onp-spec painel <feature>` sobe um servidor HTTP local zero-dependências
+(node:http, bind exclusivo em 127.0.0.1) com o plano acontecendo em tempo
+real: status por faixa, cauda dos logs de cada janela, tasks.md, provas do
+verify e veredito do gate — o cliente sonda `/api/estado` a cada 1s. O botão
+"Executar todas as tarefas em janelas limpas e paralelas" dispara o
+`executar-tarefas.sh` de verdade via `POST /executar`, protegido por token de
+sessão embutido na página + checagem de Host (mitiga CSRF/DNS-rebinding); em
+plano do Antigravity o painel é somente acompanhamento (quem executa são os
+agentes nativos). Se o plano não existe, o painel gera na hora.
+
 ## Camada de lições (src/core/sinais.js + src/core/licoes.js)
 
 O agente entra com o julgamento (frasear a regra geral); o motor é dono de

@@ -89,9 +89,15 @@ O que você recebe de volta, sempre em português simples:
   agente é obrigado a confessar.
 - **Plano de execução visual** — tarefas que não se tocam rodam **em
   paralelo**, cada uma em sua janela limpa (git worktree + branch próprios).
-  No Claude Code, o plano vem com `plano-execucao.html` e o botão
+  O agente sempre te avisa: *"X dessas tarefas podem rodar em paralelo —
+  quer que eu execute?"* No Claude Code, o plano vem com o botão
   **"Executar todas as tarefas em janelas limpas e paralelas"**; no
   Antigravity, com um prompt pronto por faixa para os agentes paralelos.
+- **Acompanhamento ao vivo, sem comandos** — peça *"abre o painel"* e o
+  agente sobe um painel local no navegador (zero instalação): cada faixa em
+  tempo real, o log de cada janela rolando, as provas e o veredito do gate.
+  No Claude Code, o botão do painel dispara a execução de verdade, com um
+  clique.
 - **Gestão de commits e branches feita** — 1 tarefa = 1 commit rastreável,
   merges organizados, árvore limpa no final.
 - **A prova** — ao final, a auditoria mecânica: cada critério de aceite tem um
