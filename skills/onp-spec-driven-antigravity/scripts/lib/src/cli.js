@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml, renderPlanoJson } from './core/plano.js';
 import { servirPainel } from './core/painel.js';
-import { registrarEvento, podarLedger, lerStream } from './core/ledger.js';
+import { registrarEvento, podarLedger, lerStream, lerEventos } from './core/ledger.js';
 import { TASK_STATUSES } from './parsers/tasks.js';
 import { DASH, foldStatus } from './util/text.js';
 import { loadConfig, DEFAULT_CONFIG } from './config.js';
@@ -439,13 +439,34 @@ async function cmdPainel(project, positional, flags) {
     featureName,
     'plano.json'
   );
+
+  // O painel só enxerga o que está no ledger. Um plano pode existir em disco e
+  // estar FORA dele: nunca foi gerado (primeira vez) ou veio de uma versão
+  // anterior, que não tinha ledger. Nos dois casos, registrar agora — senão o
+  // painel abriria vazio sem explicar por quê.
+  let motivo = null;
   if (!existsSync(planoPath)) {
+    motivo = 'plano ainda não existia';
+  } else {
+    let runId = null;
+    try {
+      runId = JSON.parse(readFileSync(planoPath, 'utf-8')).runId || null;
+    } catch {
+      motivo = 'plano.json ilegível';
+    }
+    if (!motivo && !runId) motivo = 'plano gerado por uma versão anterior (sem identificador de execução)';
+    if (!motivo && !lerEventos().some((e) => e.tipo === 'plano' && e.runId === runId)) {
+      motivo = 'plano ainda não estava no painel';
+    }
+  }
+  if (motivo) {
     const plan = gerarArtefatosPlano(project, featureName, det.agent);
     if (plan.erro) {
       console.error(`erro: ${plan.erro}`);
       return 2;
     }
-    console.log(`· plano ainda não existia — gerado agora (${plan.gerados.join(', ')})`);
+    console.log(`· ${motivo} — regenerado e registrado agora:`);
+    for (const g of plan.gerados) console.log(`    ${g}`);
   }
   await servirPainel({
     rootDir: project.config.rootDir,

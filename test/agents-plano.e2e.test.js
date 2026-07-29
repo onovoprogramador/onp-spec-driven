@@ -188,6 +188,26 @@ test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {
   assert.equal(cli('tarefa', 'pagamentos', 'T-001', 'meio-feita').code, 2);
 });
 
+test('upgrade: plano de versão anterior (sem runId) é registrado no painel em vez de sumir', () => {
+  const planoPath = path.join(root, '.spec', 'features', 'pagamentos', 'plano.json');
+  // simula o artefato de uma versão que não tinha ledger
+  const antigo = JSON.parse(readFileSync(planoPath, 'utf-8'));
+  delete antigo.runId;
+  writeFileSync(planoPath, JSON.stringify(antigo, null, 2));
+
+  // `painel` precisa perceber e regenerar; usamos o próprio plano para provar
+  // que a regeneração acontece (o comando painel bloqueia servindo HTTP)
+  const r = cli('plano', 'pagamentos');
+  assert.equal(r.code, 0, r.out);
+  const novo = JSON.parse(readFileSync(planoPath, 'utf-8'));
+  assert.ok(novo.runId, 'plano regenerado ganha identificador de execução');
+
+  // e o ledger passa a conhecer essa execução
+  const ledger = readFileSync(path.join(homeOnp, 'painel', 'ledger.jsonl'), 'utf-8');
+  assert.ok(ledger.includes(novo.runId), 'execução registrada no ledger global');
+  assert.ok(ledger.includes('"tipo":"plano"'));
+});
+
 test('plano detecta o agente pelo que está instalado quando não há flag', () => {
   // este root tem só .claude/skills → default claude gera o sh
   const { code, out } = cli('plano', 'pagamentos');
