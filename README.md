@@ -77,7 +77,9 @@ e cola a prova na conversa. Seu trabalho é conversar:
 >
 > *"Boa. Divide em tarefas e gera o plano de execução paralela."*
 >
-> *"Executa o plano."*
+> *"Executa o plano e abre o painel para eu acompanhar."*
+>
+> *"A faixa 2 falhou — reexecuta só ela."*
 >
 > *"Audita o que foi feito contra a spec e me mostra a prova."*
 
@@ -93,11 +95,16 @@ O que você recebe de volta, sempre em português simples:
   quer que eu execute?"* No Claude Code, o plano vem com o botão
   **"Executar todas as tarefas em janelas limpas e paralelas"**; no
   Antigravity, com um prompt pronto por faixa para os agentes paralelos.
-- **Acompanhamento ao vivo, sem comandos** — peça *"abre o painel"* e o
-  agente sobe um painel local no navegador (zero instalação): cada faixa em
-  tempo real, o log de cada janela rolando, as provas e o veredito do gate.
-  No Claude Code, o botão do painel dispara a execução de verdade, com um
-  clique.
+- **Acompanhamento ao vivo, sem comandos** — peça *"abre o painel"* e o agente
+  sobe um painel local no navegador (zero instalação) onde você vê, em tempo
+  real, **o que cada modelo está fazendo dentro de cada janela**: a ferramenta
+  que ele chamou e com quais argumentos, o raciocínio, a saída do comando, e o
+  fechamento com turnos, duração e custo. É um espelho da sessão headless.
+  Um painel serve **todos os seus projetos** ao mesmo tempo — dá para ver
+  qual projeto está rodando e quais tarefas dentro dele.
+- **Falhou uma faixa? refaça só ela** — um clique em *↻ reexecutar* (ou
+  `--faixa <id>` no terminal) repete apenas aquela faixa, do zero e numa
+  janela limpa, sem tocar no que já passou.
 - **Gestão de commits e branches feita** — 1 tarefa = 1 commit rastreável,
   merges organizados, árvore limpa no final.
 - **A prova** — ao final, a auditoria mecânica: cada critério de aceite tem um
@@ -157,6 +164,8 @@ na própria skill: [skills/onp-spec-driven/SKILL.md](skills/onp-spec-driven/SKIL
 ## Requisitos
 
 Node.js ≥ 18. Sem outras dependências — nem para você, nem para o agente.
+(O repositório tem uma devDependency opcional, Playwright, só para os testes
+de interface do painel: `npm run test:ui`. O `npm test` continua zero-deps.)
 
 ## Licença
 

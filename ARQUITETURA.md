@@ -181,11 +181,18 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
   commits (1 tarefa = 1 commit `T-xxx <feature>: título`; merge `--no-ff` na
   branch de trabalho `spec/<feature>`; gate final verify + audit).
 - **claude**: `executar-tarefas.sh` (headless: `claude -p` por tarefa com
-  `--model`/`--effort`, permission-mode `paralelo.permissionMode` default
-  acceptEdits + allowedTools derivada do testCommand; valida ambiente e árvore
-  limpa; auto-commita artefatos do plano; mescla, marca `[concluida]` via
-  `onp-spec tarefa`, fecha a contabilidade no git e roda o gate) e
-  `plano-execucao.html` (visual com o botão que copia o comando do script).
+  `--model`/`--effort` + `--output-format stream-json --verbose`,
+  permission-mode `paralelo.permissionMode` default acceptEdits + allowedTools
+  derivada do testCommand; valida ambiente e árvore limpa; auto-commita
+  artefatos do plano; mescla, marca `[concluida]` via `onp-spec tarefa`, fecha
+  a contabilidade no git e roda o gate) e `plano-execucao.html` (visual com o
+  botão que copia o comando do script).
+
+  O script é um **dispatcher**, não um roteiro linear: cada faixa e cada
+  sequencial é uma função, então `--faixa <id>` reexecuta só a que falhou
+  (limpando worktree e branch da tentativa anterior antes de recriar),
+  `--seq <T-xxx>` refaz uma sequencial, `--gate` roda só o veredito e
+  `--listar` mostra os alvos. Cada tentativa é contada e vai para o ledger.
 - **antigravity**: o md ganha comandos de worktree e um prompt pronto por
   faixa para os agentes paralelos nativos — nunca depende do CLI do Claude.
 
@@ -196,17 +203,51 @@ O plano também sai em `plano.json` (leitura de máquina) e o script emite uma
 trilha de eventos (`<logs>/plano-eventos.log`: faixa executando/mesclada/
 conflito, tarefas, gate, fim) — é o que alimenta o painel.
 
+## Ledger global (src/core/ledger.js)
+
+Estado de execução NÃO mora no repositório do usuário: mora num **arquivo
+único, global**, `~/.onp-spec/painel/ledger.jsonl` (raiz configurável por
+`ONP_SPEC_HOME`, o que também isola os testes). Cada linha é um evento
+(`plano`, `inicio`, `faixa`, `tarefa`, `gate`, `fim`) carimbado com `runId`,
+`projeto`, `projetoDir` e `feature` — então um mesmo ledger cobre quantos
+projetos existirem, e `montarArvore()` reconstrói projeto → execução → faixa →
+tarefa a partir dele. `podarLedger()` mantém as 30 execuções mais recentes e
+apaga os streams das antigas. Linha corrompida é ignorada, nunca derruba a
+leitura.
+
+Regra de honestidade embutida na árvore: **trabalho novo invalida o veredito
+anterior** (`gateDesatualizado`), então uma execução só aparece "concluída"
+com audit fresco em 0. O `--sem-gate` registra `fim: 1` de propósito — sem
+audit não existe prova.
+
+O stream de cada tarefa é o NDJSON cru de `claude -p --output-format
+stream-json --verbose`, em `~/.onp-spec/painel/streams/<runId>/<faixa>--<T-xxx>.jsonl`.
+`resumirStream()` traduz para uma linha do tempo (`inicio`, `ferramenta`,
+`pensando`, `saida`, `texto`, `fim`) com corte de tamanho e leitura
+incremental por cursor de linhas. Observação honesta: em headless o bloco
+`thinking` costuma vir redigido (vazio + signature); o painel mostra a
+atividade e a contagem de `system/thinking_tokens`, e diz que o conteúdo não
+foi exposto — não inventa raciocínio.
+
 ## Painel ao vivo (src/core/painel.js)
 
-`onp-spec painel <feature>` sobe um servidor HTTP local zero-dependências
-(node:http, bind exclusivo em 127.0.0.1) com o plano acontecendo em tempo
-real: status por faixa, cauda dos logs de cada janela, tasks.md, provas do
-verify e veredito do gate — o cliente sonda `/api/estado` a cada 1s. O botão
-"Executar todas as tarefas em janelas limpas e paralelas" dispara o
-`executar-tarefas.sh` de verdade via `POST /executar`, protegido por token de
-sessão embutido na página + checagem de Host (mitiga CSRF/DNS-rebinding); em
-plano do Antigravity o painel é somente acompanhamento (quem executa são os
-agentes nativos). Se o plano não existe, o painel gera na hora.
+`onp-spec painel [feature]` sobe um servidor HTTP local zero-dependências
+(node:http, bind exclusivo em 127.0.0.1). **Sem feature** mostra todos os
+projetos do ledger; com feature, filtra. O cliente sonda `/api/estado` a cada
+1s e busca o stream da tarefa selecionada por `/api/stream?run&chave&desde`
+(incremental — só o que chegou). O front segue sozinho a tarefa em execução
+(e, quando nada roda, a que falhou), então acompanhar não exige clique.
+
+Ações: `POST /executar {runId, escopo}` dispara o `executar-tarefas.sh` de
+verdade, com `escopo` traduzido por `argsDoEscopo()` para `[]` / `--gate` /
+`--faixa <id>` / `--seq <T-xxx>` — qualquer outro valor é recusado (nada de
+argumento arbitrário chegando ao shell). Protegido por token de sessão
+embutido na página + checagem de Host (mitiga CSRF e DNS-rebinding). Plano do
+Antigravity responde 409: lá a execução é dos agentes nativos e o painel só
+acompanha.
+
+Testes de interface (navegador real, Playwright) ficam em `test/ui/` e rodam
+com `npm run test:ui` — fora do `npm test` para o pacote seguir zero-deps.
 
 ## Camada de lições (src/core/sinais.js + src/core/licoes.js)
 

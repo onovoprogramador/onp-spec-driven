@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml, renderPlanoJson } from './core/plano.js';
 import { servirPainel } from './core/painel.js';
+import { registrarEvento, podarLedger, lerStream } from './core/ledger.js';
 import { TASK_STATUSES } from './parsers/tasks.js';
 import { DASH, foldStatus } from './util/text.js';
 import { loadConfig, DEFAULT_CONFIG } from './config.js';
@@ -79,11 +80,14 @@ comandos:
                         (visual, botão "Executar todas as tarefas...")
                       · antigravity: prompts prontos por faixa p/ os agentes
                         paralelos nativos (não depende do CLI do Claude)
-  painel <feature> [--porta N] [--sem-abrir]
+  painel [feature] [--porta N] [--sem-abrir]
                       painel AO VIVO no navegador (servidor local, zero deps,
-                      só 127.0.0.1): faixas em tempo real, logs rolando, gate
-                      — e o botão "Executar todas as tarefas..." que executa
-                      de verdade. Acompanhe sem digitar mais nada.
+                      só 127.0.0.1). SEM feature: mostra TODOS os projetos e
+                      execuções do ledger global. Em tempo real: árvore
+                      projeto → execução → faixa → tarefa, o STREAM do modelo
+                      (ferramenta chamada, raciocínio, saída, custo), o gate,
+                      e botões para executar tudo, REEXECUTAR só a faixa que
+                      falhou, ou rodar só o gate.
   tarefa <feature> <T-xxx> <status>
                       atualiza o status da tarefa no tasks.md
                       (pendente | em-andamento | concluida)
@@ -288,7 +292,8 @@ function gerarArtefatosPlano(project, featureName, agent) {
   if (plan.erro) return plan;
   const dir = path.join(project.config.rootDir, plan.baseDir);
   writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
-  writeFileSync(path.join(dir, 'plano.json'), renderPlanoJson(plan));
+  const planoJson = renderPlanoJson(plan);
+  writeFileSync(path.join(dir, 'plano.json'), planoJson);
   const gerados = [`${plan.baseDir}/plano-execucao.md`, `${plan.baseDir}/plano.json`];
   if (plan.agent === 'claude') {
     const sh = path.join(dir, 'executar-tarefas.sh');
@@ -297,8 +302,73 @@ function gerarArtefatosPlano(project, featureName, agent) {
     writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
     gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
   }
+  // registra a execução no ledger GLOBAL: é assim que o painel enxerga este
+  // projeto junto com os outros, mesmo antes de qualquer execução
+  registrarEvento({
+    tipo: 'plano',
+    runId: plan.runId,
+    projeto: plan.repoName,
+    projetoDir: project.config.rootDir,
+    feature: plan.feature,
+    agent: plan.agent,
+    plano: JSON.parse(planoJson),
+  });
+  podarLedger();
   plan.gerados = gerados;
   return plan;
+}
+
+// `onp-spec evento` — usado pelo executar-tarefas.sh para alimentar o ledger
+// global. Interno: não aparece na ajuda principal.
+function cmdEvento(flags) {
+  if (!flags.run || !flags.tipo) {
+    console.error('uso interno: onp-spec evento --run <runId> --tipo <plano|inicio|faixa|tarefa|gate|fim> [...]');
+    return 2;
+  }
+  const num = (v) => (v === undefined || v === true ? undefined : parseInt(v, 10));
+  registrarEvento({
+    runId: flags.run,
+    tipo: flags.tipo,
+    faixa: typeof flags.faixa === 'string' ? flags.faixa : undefined,
+    tarefa: typeof flags.tarefa === 'string' ? flags.tarefa : undefined,
+    estado: typeof flags.estado === 'string' ? flags.estado : undefined,
+    etapa: typeof flags.etapa === 'string' ? flags.etapa : undefined,
+    stream: typeof flags.stream === 'string' ? flags.stream : undefined,
+    escopo: typeof flags.escopo === 'string' ? flags.escopo : undefined,
+    exit: num(flags.exit),
+    tentativa: num(flags.tentativa),
+  });
+  return 0;
+}
+
+// `onp-spec stream-resumo <runId> <chave>` — uma linha legível no terminal a
+// partir do stream NDJSON (o painel mostra a versão completa)
+function cmdStreamResumo(positional) {
+  const [runId, chave] = positional;
+  if (!runId || !chave) {
+    console.error('uso interno: onp-spec stream-resumo <runId> <chave>');
+    return 2;
+  }
+  const { itens, resumo, existe } = lerStream(runId, chave);
+  if (!existe) {
+    console.log(`  (sem stream gravado para ${chave})`);
+    return 0;
+  }
+  const ferramentas = itens.filter((i) => i.tipo === 'ferramenta');
+  const contagem = {};
+  for (const f of ferramentas) contagem[f.nome] = (contagem[f.nome] || 0) + 1;
+  const usadas = Object.entries(contagem)
+    .map(([n, c]) => (c > 1 ? `${n}×${c}` : n))
+    .join(', ');
+  const partes = [];
+  if (resumo) {
+    partes.push(resumo.status);
+    if (resumo.turnos != null) partes.push(`${resumo.turnos} turno(s)`);
+    if (resumo.duracaoMs != null) partes.push(`${(resumo.duracaoMs / 1000).toFixed(1)}s`);
+    if (resumo.custoUsd != null) partes.push(`US$ ${resumo.custoUsd.toFixed(4)}`);
+  }
+  console.log(`  ↳ ${chave}: ${partes.join(' · ') || 'em andamento'}${usadas ? ` · ferramentas: ${usadas}` : ''}`);
+  return 0;
 }
 
 function cmdPlano(project, positional, flags) {
@@ -341,12 +411,22 @@ function cmdPlano(project, positional, flags) {
   return 0;
 }
 
+// Painel GLOBAL (sem feature): mostra todos os projetos do ledger. Não precisa
+// de .spec/ nem de plano — serve para acompanhar tudo que está rodando.
+async function cmdPainelGlobal(config, flags) {
+  console.log('· painel global: todas as execuções de todos os projetos no ledger');
+  await servirPainel({
+    rootDir: config.rootDir,
+    specDir: config.specDir,
+    global: true,
+    porta: parseInt(flags.porta, 10) || 4747,
+    abrir: !flags['sem-abrir'],
+  });
+  return new Promise(() => {});
+}
+
 async function cmdPainel(project, positional, flags) {
   const featureName = positional[0];
-  if (!featureName) {
-    console.error('uso: onp-spec painel <feature> [--porta N] [--sem-abrir]');
-    return 2;
-  }
   const det = detectarAgente(project.config.rootDir, flags.agents);
   if (det.erro) {
     console.error(det.erro);
@@ -359,7 +439,6 @@ async function cmdPainel(project, positional, flags) {
     featureName,
     'plano.json'
   );
-  let agent = det.agent;
   if (!existsSync(planoPath)) {
     const plan = gerarArtefatosPlano(project, featureName, det.agent);
     if (plan.erro) {
@@ -367,18 +446,11 @@ async function cmdPainel(project, positional, flags) {
       return 2;
     }
     console.log(`· plano ainda não existia — gerado agora (${plan.gerados.join(', ')})`);
-  } else {
-    try {
-      agent = JSON.parse(readFileSync(planoPath, 'utf-8')).agent || det.agent;
-    } catch {
-      // plano.json corrompido — o estado vai reportar o erro no navegador
-    }
   }
   await servirPainel({
     rootDir: project.config.rootDir,
     specDir: project.config.specDir,
     feature: featureName,
-    agent,
     porta: parseInt(flags.porta, 10) || 4747,
     abrir: !flags['sem-abrir'],
   });
@@ -656,6 +728,11 @@ export async function run(argv) {
   if (command === 'licoes') return cmdLicoes(config, positional, flags);
   // tarefa idem: edição pontual de status no tasks.md (usada pelo executor)
   if (command === 'tarefa') return cmdTarefa(config, positional);
+  // comandos internos do executar-tarefas.sh (alimentam/leem o ledger global)
+  if (command === 'evento') return cmdEvento(flags);
+  if (command === 'stream-resumo') return cmdStreamResumo(positional);
+  // painel sem feature = visão global; não exige .spec/ nem plano
+  if (command === 'painel' && !positional[0]) return cmdPainelGlobal(config, flags);
 
   const project = loadProject(config);
 

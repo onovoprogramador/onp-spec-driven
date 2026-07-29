@@ -4,7 +4,7 @@ description: Desenvolvimento spec-anchored — a especificação continua verdad
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.2.0
+  version: 3.3.0
   agent: claude
 ---
 
@@ -187,11 +187,21 @@ produto).
   manual (você mesmo implementa faixa a faixa, seguindo branches e commits do
   plano).
 - **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
-  em background (Bash com run_in_background) e entregue a URL ao usuário —
-  abre um painel local no navegador com as faixas em tempo real, o log de
-  cada janela rolando, as provas e o gate; o botão **"Executar todas as
-  tarefas em janelas limpas e paralelas"** de lá dispara o script DE VERDADE.
+  em background (Bash com run_in_background) e entregue a URL ao usuário. O
+  painel mostra, em tempo real: a árvore projeto → execução → faixa → tarefa,
+  e **o que o modelo está fazendo em cada janela headless** — ferramenta
+  chamada com o argumento, raciocínio (tokens), saída da ferramenta, e o
+  fechamento com turnos, duração e custo. O botão **"Executar todas as
+  tarefas em janelas limpas e paralelas"** dispara o script DE VERDADE, e
+  cada faixa que falha ganha um botão **"↻ reexecutar"** que roda só ela.
   É assim que o usuário acompanha sem digitar comando nenhum.
+- **`onp-spec painel` sem feature** abre a visão global: todas as execuções de
+  TODOS os projetos, do ledger único em `~/.onp-spec/painel/ledger.jsonl`.
+  Use quando o usuário tem várias frentes rodando ao mesmo tempo.
+- **Falhou uma faixa? não reexecute tudo.** `executar-tarefas.sh --faixa <id>`
+  refaz só ela (worktree e branch da tentativa anterior são limpos antes),
+  `--seq <T-xxx>` refaz uma sequencial, `--gate` roda só o veredito, e
+  `--listar` mostra os alvos. O trabalho que já passou fica intacto.
 - Mudou tasks.md ou a config (`paralelo` no onpspec.config.json)? **Regenere
   o plano** — nunca edite os artefatos à mão.
 
@@ -278,7 +288,12 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
 - **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
-- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>`.
+- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>` (ou
+  `onp-spec painel` para todos os projetos de uma vez).
+- **"O que o modelo está fazendo agora?"** → o painel mostra o stream da
+  sessão headless: ferramenta, raciocínio, saída, custo.
+- **"Só uma faixa falhou, como refaço só ela?"** →
+  `bash <baseDir>/executar-tarefas.sh --faixa <id>` (ou o botão ↻ no painel).
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

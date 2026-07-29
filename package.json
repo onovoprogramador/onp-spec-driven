@@ -1,6 +1,6 @@
 {
   "name": "@onovoprogramador/onp-spec",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publishConfig": {
     "access": "public"
   },
@@ -14,9 +14,10 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test \"test/*.test.js\"",
     "bench": "node benchmark/run.js",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "test:ui": "node --test \"test/ui/**/*.test.js\""
   },
   "files": [
     "bin/",
@@ -36,5 +37,8 @@
     "claude-code"
   ],
   "author": "Vitor Manoel — O Novo Programador",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
 }

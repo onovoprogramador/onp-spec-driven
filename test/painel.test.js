@@ -1,194 +1,281 @@
-// Painel ao vivo: parser da trilha de eventos, montagem de estado a partir
-// de arquivos reais e o servidor HTTP (rotas, guarda de token, host local).
+// Painel ao vivo: servidor multi-projeto sobre o ledger global. Prova as
+// rotas, o incremental do stream, a tradução escopo → argumentos do script e
+// as guardas (token, host, agente errado, execução duplicada).
 
-import { test, after } from 'node:test';
+import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs';
+import http from 'http';
 import path from 'path';
 import os from 'os';
-import { parseEventos, tailArquivo, montarEstado, servirPainel } from '../src/core/painel.js';
+import { registrarEvento, caminhos, caminhoStream } from '../src/core/ledger.js';
+import { servirPainel, montarEstadoGlobal, argsDoEscopo, tailArquivo } from '../src/core/painel.js';
 
-const tmp = mkdtempSync(path.join(os.tmpdir(), 'onpspec-painel-'));
-after(() => rmSync(tmp, { recursive: true, force: true }));
+let home;
+let repo;
+const antes = process.env.ONP_SPEC_HOME;
 
-test('parseEventos reconstrói o estado da execução na ordem dos eventos', () => {
-  const ex = parseEventos(
-    [
-      '2026-07-28T10:00:00Z|inicio|pagamentos',
-      '2026-07-28T10:00:01Z|onda|1|inicio',
-      '2026-07-28T10:00:01Z|faixa|faixa-1|executando',
-      '2026-07-28T10:00:01Z|faixa|faixa-2|executando',
-      '2026-07-28T10:03:00Z|faixa|faixa-1|exit|0',
-      '2026-07-28T10:03:01Z|faixa|faixa-1|mesclada',
-      '2026-07-28T10:03:02Z|tarefa|T-001|concluida',
-      '2026-07-28T10:03:10Z|faixa|faixa-2|exit|1',
-      '2026-07-28T10:03:10Z|faixa|faixa-2|falhou',
-      '2026-07-28T10:03:20Z|seq|T-004|executando',
-      '2026-07-28T10:04:00Z|seq|T-004|concluida',
-      '2026-07-28T10:04:01Z|gate|verify|0',
-      '2026-07-28T10:04:05Z|gate|audit|1',
-      '2026-07-28T10:04:05Z|fim|1',
-    ].join('\n')
-  );
-  assert.equal(ex.inicio, '2026-07-28T10:00:00Z');
-  assert.equal(ex.faixas['faixa-1'], 'mesclada');
-  assert.equal(ex.faixas['faixa-2'], 'falhou');
-  assert.equal(ex.tarefas['T-001'], 'concluida');
-  assert.equal(ex.seq['T-004'], 'concluida');
-  assert.deepEqual(ex.gate, { verify: 0, audit: 1 });
-  assert.equal(ex.fim, 1);
+before(() => {
+  home = mkdtempSync(path.join(os.tmpdir(), 'onpspec-painel-'));
+  process.env.ONP_SPEC_HOME = home;
+});
+after(() => {
+  if (antes === undefined) delete process.env.ONP_SPEC_HOME;
+  else process.env.ONP_SPEC_HOME = antes;
+  rmSync(home, { recursive: true, force: true });
+});
+beforeEach(() => {
+  rmSync(caminhos().dir, { recursive: true, force: true });
+  repo = mkdtempSync(path.join(os.tmpdir(), 'onpspec-repo-'));
 });
 
-test('parseEventos: exit 0 sem merge ainda vira "mesclando"; lixo é ignorado', () => {
-  const ex = parseEventos('x\n\n2026|faixa|faixa-1|executando\n2026|faixa|faixa-1|exit|0\nlinha solta');
-  assert.equal(ex.faixas['faixa-1'], 'mesclando');
-  assert.equal(ex.fim, null);
-});
+const STREAM = [
+  '{"type":"system","subtype":"init","session_id":"abc12345","model":"claude-sonnet-5"}',
+  '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}',
+  '{"type":"user","message":{"content":[{"type":"tool_result","content":"ok"}]}}',
+].join('\n');
 
-test('tailArquivo devolve só a cauda e não explode com arquivo inexistente', () => {
-  const p = path.join(tmp, 'grande.log');
-  writeFileSync(p, Array.from({ length: 500 }, (_, i) => `linha ${i}`).join('\n'));
-  const cauda = tailArquivo(p, { maxLinhas: 5 });
-  assert.equal(cauda.split('\n').length, 5);
-  assert.match(cauda, /linha 499$/);
-  assert.equal(tailArquivo(path.join(tmp, 'nao-existe.log')), '');
-});
-
-// fixture: projeto com plano.json + tasks.md + trilha de eventos + logs
-function criarFixture({ comScript = false } = {}) {
-  const rootDir = path.join(tmp, 'repo');
-  const baseDir = path.join(rootDir, '.spec', 'features', 'pagamentos');
-  mkdirSync(baseDir, { recursive: true });
-  writeFileSync(
-    path.join(baseDir, 'plano.json'),
-    JSON.stringify({
-      feature: 'pagamentos',
-      agent: 'claude',
-      repoName: 'repo',
-      branchTrabalho: 'spec/pagamentos',
+function fixture({ agent = 'claude', comScript = true, feature = 'pagamentos', runId = 'run-1' } = {}) {
+  const baseDir = `.spec/features/${feature}`;
+  mkdirSync(path.join(repo, baseDir), { recursive: true });
+  if (comScript) {
+    const sh = path.join(repo, baseDir, 'executar-tarefas.sh');
+    // script de mentira: só registra os argumentos que recebeu
+    writeFileSync(sh, `#!/usr/bin/env bash\necho "args: $*" > "${path.join(repo, 'chamada.txt')}"\nexit 0\n`);
+    chmodSync(sh, 0o755);
+  }
+  registrarEvento({
+    tipo: 'plano',
+    runId,
+    projeto: path.basename(repo),
+    projetoDir: repo,
+    feature,
+    agent,
+    plano: {
+      runId,
+      branchTrabalho: `spec/${feature}`,
+      baseDir,
       ondas: [['faixa-1']],
       faixas: [
         {
           id: 'faixa-1',
-          branch: 'spec/pagamentos-faixa-1',
-          worktree: '../onp-worktrees/repo-pagamentos-faixa-1',
-          tarefas: [{ id: 'T-001', titulo: 'Modelo', modelo: 'claude-sonnet-5', esforco: 'medium', arquivos: ['src/a.js'], refs: [] }],
+          branch: `spec/${feature}-faixa-1`,
+          worktree: '../wt',
+          tarefas: [{ id: 'T-001', titulo: 'Modelo', modelo: 'claude-sonnet-5', esforco: 'medium', arquivos: ['src/a.js'] }],
         },
       ],
       sequenciais: [],
-      concluidas: [],
-      avisos: [],
-    })
-  );
-  writeFileSync(path.join(baseDir, 'tasks.md'), '# Tasks\n\n## T-001 — Modelo [concluida]\n\n- Refs: AC-001\n- Arquivos: src/a.js\n');
-  const shPath = path.join(baseDir, 'executar-tarefas.sh');
-  rmSync(shPath, { force: true });
-  if (comScript) writeFileSync(shPath, '#!/bin/bash\nexit 0\n');
-  const logsDir = path.join(tmp, 'onp-worktrees', 'repo-pagamentos-logs');
-  mkdirSync(logsDir, { recursive: true });
-  writeFileSync(path.join(logsDir, 'plano-eventos.log'), '2026|inicio|pagamentos\n2026|faixa|faixa-1|mesclada\n2026|fim|0\n');
-  writeFileSync(path.join(logsDir, 'faixa-1.log'), 'trabalhando...\ncommit feito\n');
-  mkdirSync(path.join(rootDir, '.spec', 'verification'), { recursive: true });
-  writeFileSync(
-    path.join(rootDir, '.spec', 'verification', 'pagamentos.json'),
-    JSON.stringify({ results: { 'AC-001': { status: 'pass' } } })
-  );
-  return rootDir;
+    },
+  });
+  mkdirSync(path.dirname(caminhoStream(runId, 'faixa-1--T-001')), { recursive: true });
+  writeFileSync(caminhoStream(runId, 'faixa-1--T-001'), STREAM);
+  return { runId, baseDir };
 }
 
-test('montarEstado junta plano + eventos + tasks.md + provas + cauda de logs', () => {
-  const rootDir = criarFixture();
-  const e = montarEstado({ rootDir, specDir: '.spec', feature: 'pagamentos' });
-  assert.ok(!e.erro, e.erro);
-  assert.equal(e.plan.feature, 'pagamentos');
-  assert.equal(e.execucao.faixas['faixa-1'], 'mesclada');
-  assert.equal(e.execucao.fim, 0);
-  assert.equal(e.tasksMd['T-001'], 'concluida');
-  assert.deepEqual(e.provas, { total: 1, pass: 1 });
-  assert.match(e.logs['faixa-1'], /commit feito/);
-  assert.equal(e.rodando, false); // fim registrado
+async function subir(opts = {}) {
+  return servirPainel({ rootDir: repo, specDir: '.spec', porta: 0, abrir: false, log: () => {}, ...opts });
+}
+
+test('argsDoEscopo traduz o escopo em argumentos do executar-tarefas.sh', () => {
+  assert.deepEqual(argsDoEscopo('tudo'), []);
+  assert.deepEqual(argsDoEscopo(undefined), []);
+  assert.deepEqual(argsDoEscopo('gate'), ['--gate']);
+  assert.deepEqual(argsDoEscopo('faixa:faixa-2'), ['--faixa', 'faixa-2']);
+  assert.deepEqual(argsDoEscopo('seq:T-004'), ['--seq', 'T-004']);
+  assert.equal(argsDoEscopo('rm -rf /'), null, 'escopo inventado é recusado');
+  assert.equal(argsDoEscopo('--dangerously'), null);
 });
 
-test('montarEstado sem plano.json devolve erro amigável', () => {
-  const e = montarEstado({ rootDir: tmp, specDir: '.spec', feature: 'fantasma' });
-  assert.match(e.erro, /onp-spec plano fantasma/);
+test('tailArquivo devolve a cauda e tolera arquivo ausente', () => {
+  const p = path.join(repo, 'l.log');
+  writeFileSync(p, Array.from({ length: 200 }, (_, i) => `l${i}`).join('\n'));
+  const t = tailArquivo(p, { maxLinhas: 3 });
+  assert.deepEqual(t.split('\n'), ['l197', 'l198', 'l199']);
+  assert.equal(tailArquivo(path.join(repo, 'nao-existe.log')), '');
 });
 
-test('servidor: página com botão, estado JSON e token obrigatório no POST', async () => {
-  const rootDir = criarFixture({ comScript: true });
-  const { server, url, token } = await servirPainel({
-    rootDir,
-    specDir: '.spec',
-    feature: 'pagamentos',
-    agent: 'claude',
-    porta: 0,
-    abrir: false,
-    log: () => {},
-  });
+test('montarEstadoGlobal filtra por projeto e calcula silêncio', () => {
+  fixture();
+  const est = montarEstadoGlobal({ projetoDir: repo });
+  assert.equal(est.projetos.length, 1);
+  const ex = est.projetos[0].execucoes[0];
+  assert.equal(ex.feature, 'pagamentos');
+  assert.equal(typeof ex.silencioSeg, 'number');
+  assert.equal(ex.disparadoAqui, false);
+  assert.deepEqual(montarEstadoGlobal({ projetoDir: '/outro/lugar' }).projetos, []);
+});
+
+test('página do painel: título, escopo e token da sessão embutido', async () => {
+  fixture();
+  const { server, url, token } = await subir({ feature: 'pagamentos' });
   try {
-    const pagina = await (await fetch(url)).text();
-    assert.match(pagina, /Painel — pagamentos/);
-    assert.match(pagina, /Executar todas as tarefas em janelas limpas e paralelas/);
-    assert.ok(pagina.includes(token), 'token da sessão embutido na página');
+    const html = await (await fetch(url)).text();
+    assert.match(html, /<title>Painel — pagamentos<\/title>/);
+    assert.ok(html.includes(token), 'token vai na página para o POST autenticar');
+    assert.match(html, /Executar tudo/);
+    assert.match(html, /reexecutar/, 'a UI oferece reexecução por faixa');
+  } finally {
+    server.close();
+  }
+});
 
-    const estado = await (await fetch(`${url}api/estado`)).json();
-    assert.equal(estado.plan.feature, 'pagamentos');
-    assert.equal(estado.execucao.fim, 0);
+test('painel global anuncia todos os projetos no título', async () => {
+  fixture();
+  const { server, url } = await subir({ global: true });
+  try {
+    const html = await (await fetch(url)).text();
+    assert.match(html, /todos os projetos/);
+  } finally {
+    server.close();
+  }
+});
 
-    // POST sem token e com token errado: barrado
-    assert.equal((await fetch(`${url}executar`, { method: 'POST' })).status, 403);
+test('/api/estado devolve a árvore com faixas e tarefas', async () => {
+  fixture();
+  const { server, url } = await subir({ global: true });
+  try {
+    const est = await (await fetch(`${url}api/estado`)).json();
+    const ex = est.projetos[0].execucoes[0];
+    assert.equal(ex.faixas[0].tarefas[0].id, 'T-001');
+    assert.equal(ex.total, 1);
+    assert.ok(est.atualizado);
+  } finally {
+    server.close();
+  }
+});
+
+test('/api/stream devolve a linha do tempo e respeita o cursor "desde"', async () => {
+  const { runId } = fixture();
+  const { server, url } = await subir({ global: true });
+  try {
+    const cheio = await (await fetch(`${url}api/stream?run=${runId}&chave=faixa-1--T-001`)).json();
+    assert.equal(cheio.existe, true);
+    assert.equal(cheio.total, 3);
+    assert.deepEqual(cheio.itens.map((i) => i.tipo), ['inicio', 'ferramenta', 'saida']);
+    assert.equal(cheio.itens[1].resumo, 'npm test');
+
+    const incremental = await (await fetch(`${url}api/stream?run=${runId}&chave=faixa-1--T-001&desde=2`)).json();
+    assert.deepEqual(incremental.itens.map((i) => i.tipo), ['saida']);
+
+    const inexistente = await (await fetch(`${url}api/stream?run=${runId}&chave=faixa-9--T-999`)).json();
+    assert.equal(inexistente.existe, false);
+
+    assert.equal((await fetch(`${url}api/stream`)).status, 400, 'sem run/chave é 400');
+  } finally {
+    server.close();
+  }
+});
+
+test('/api/log responde 404 para execução desconhecida e vazio sem log', async () => {
+  const { runId } = fixture();
+  const { server, url } = await subir({ global: true });
+  try {
+    assert.equal((await fetch(`${url}api/log?run=fantasma`)).status, 404);
+    const d = await (await fetch(`${url}api/log?run=${runId}`)).json();
+    assert.equal(d.texto, '');
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /executar exige token e traduz o escopo em argumentos reais', async () => {
+  const { runId } = fixture();
+  const { server, url, token } = await subir({ global: true });
+  const post = (corpo, cabecalhos = {}) =>
+    fetch(`${url}executar`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...cabecalhos },
+      body: JSON.stringify(corpo),
+    });
+  try {
+    assert.equal((await post({ runId, escopo: 'tudo' })).status, 403, 'sem token: barrado');
+    assert.equal((await post({ runId, escopo: 'tudo' }, { 'x-onp-token': 'errado' })).status, 403);
     assert.equal(
-      (await fetch(`${url}executar`, { method: 'POST', headers: { 'x-onp-token': 'errado' } })).status,
-      403
+      (await post({ runId: 'fantasma', escopo: 'tudo' }, { 'x-onp-token': token })).status,
+      404,
+      'execução fora do ledger: 404'
     );
-    // token certo → dispara (o script do fixture é um no-op)
-    const ok = await fetch(`${url}executar`, { method: 'POST', headers: { 'x-onp-token': token } });
+    assert.equal(
+      (await post({ runId, escopo: 'apaga-tudo' }, { 'x-onp-token': token })).status,
+      400,
+      'escopo inválido: 400'
+    );
+
+    const ok = await post({ runId, escopo: 'faixa:faixa-1' }, { 'x-onp-token': token });
     assert.equal(ok.status, 202);
-
-    // rota desconhecida
-    assert.equal((await fetch(`${url}outra`)).status, 404);
+    // o script de mentira registra os argumentos recebidos
+    await new Promise((r) => setTimeout(r, 400));
+    const { readFileSync } = await import('fs');
+    assert.match(readFileSync(path.join(repo, 'chamada.txt'), 'utf-8'), /args: --faixa faixa-1/);
   } finally {
     server.close();
   }
 });
 
-test('servidor: sem executar-tarefas.sh o POST instrui a gerar o plano (404)', async () => {
-  const rootDir = criarFixture({ comScript: false });
-  const { server, url, token } = await servirPainel({
-    rootDir,
-    specDir: '.spec',
-    feature: 'pagamentos',
-    agent: 'claude',
-    porta: 0,
-    abrir: false,
-    log: () => {},
-  });
+test('POST /executar recusa plano do Antigravity (execução é nos agentes nativos)', async () => {
+  const { runId } = fixture({ agent: 'antigravity' });
+  const { server, url, token } = await subir({ global: true });
   try {
-    const pagina = await (await fetch(url)).text();
-    assert.match(pagina, /Modo acompanhamento/); // sem script, sem botão
-    const sem = await fetch(`${url}executar`, { method: 'POST', headers: { 'x-onp-token': token } });
-    assert.equal(sem.status, 404);
-    assert.match(await sem.text(), /onp-spec plano/);
+    const r = await fetch(`${url}executar`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-onp-token': token },
+      body: JSON.stringify({ runId, escopo: 'tudo' }),
+    });
+    assert.equal(r.status, 409);
+    assert.match(await r.text(), /agentes nativos/);
   } finally {
     server.close();
   }
 });
 
-test('servidor: plano do antigravity vira modo acompanhamento (sem botão)', async () => {
-  const rootDir = criarFixture({ comScript: true }); // mesmo com script, AG não ganha botão
-  const { server, url } = await servirPainel({
-    rootDir,
-    specDir: '.spec',
-    feature: 'pagamentos',
-    agent: 'antigravity',
-    porta: 0,
-    abrir: false,
-    log: () => {},
-  });
+test('POST /executar sem executar-tarefas.sh instrui a gerar o plano', async () => {
+  const { runId } = fixture({ comScript: false });
+  const { server, url, token } = await subir({ global: true });
   try {
-    const pagina = await (await fetch(url)).text();
-    assert.doesNotMatch(pagina, /id="btn"/);
-    assert.match(pagina, /Modo acompanhamento/);
+    const r = await fetch(`${url}executar`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-onp-token': token },
+      body: JSON.stringify({ runId, escopo: 'tudo' }),
+    });
+    assert.equal(r.status, 404);
+    assert.match(await r.text(), /onp-spec plano/);
+  } finally {
+    server.close();
+  }
+});
+
+// o fetch do Node não deixa sobrescrever o Host: precisa de requisição crua
+function pedirComHost(porta, host, caminho = '/api/estado') {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: porta, path: caminho, headers: { Host: host } }, (res) => {
+      let corpo = '';
+      res.on('data', (c) => (corpo += c));
+      res.on('end', () => resolve({ status: res.statusCode, corpo }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('requisição com Host externo é recusada (nada de DNS rebinding)', async () => {
+  fixture();
+  const { server, porta } = await subir({ global: true });
+  try {
+    const mau = await pedirComHost(porta, 'evil.example.com');
+    assert.equal(mau.status, 403);
+    assert.match(mau.corpo, /somente localhost/);
+    assert.equal((await pedirComHost(porta, `127.0.0.1:${porta}`)).status, 200);
+    assert.equal((await pedirComHost(porta, `localhost:${porta}`)).status, 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('rota desconhecida é 404', async () => {
+  fixture();
+  const { server, url } = await subir({ global: true });
+  try {
+    assert.equal((await fetch(`${url}nao-existe`)).status, 404);
   } finally {
     server.close();
   }

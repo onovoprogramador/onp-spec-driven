@@ -141,6 +141,8 @@ export function montarPlano(project, featureName, opts = {}) {
   return {
     agent,
     feature: featureName,
+    // identidade desta execução no ledger global (muda a cada plano gerado)
+    runId: opts.runId || `${repoName}-${featureName}-${Date.now().toString(36)}`,
     specDir: project.config.specDir,
     baseDir: `${project.config.specDir}/features/${featureName}`,
     branchTrabalho: `spec/${featureName}`,
@@ -230,6 +232,7 @@ export function renderPlanoJson(plan) {
   });
   return `${JSON.stringify(
     {
+      runId: plan.runId,
       feature: plan.feature,
       agent: plan.agent,
       geradoEm: plan.geradoEm,
@@ -403,8 +406,20 @@ export function renderPlanoMd(plan) {
   L.push('');
   return `${L.join('\n')}\n`;
 }
-
 // ── artefato: executar-tarefas.sh (só claude) ──────────────────────────────
+//
+// O script é um DISPATCHER, não um roteiro linear: cada faixa e cada tarefa
+// sequencial viram funções, então dá para reexecutar só o que falhou.
+//
+//   bash executar-tarefas.sh                  → tudo (ondas → sequenciais → gate)
+//   bash executar-tarefas.sh --faixa faixa-2  → só essa faixa (+ merge + gate)
+//   bash executar-tarefas.sh --seq T-004      → só essa tarefa sequencial
+//   bash executar-tarefas.sh --gate           → só verify + audit
+//   bash executar-tarefas.sh --listar         → o que existe para executar
+//
+// Cada tarefa roda `claude -p --output-format stream-json`: o NDJSON cru vai
+// para o stream da tarefa no ledger global, que é o que o painel mostra ao
+// vivo (ferramentas, raciocínio, saídas, custo).
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -415,185 +430,314 @@ function allowedTools(plan) {
   return base.join(',');
 }
 
-function chamadaClaude(plan, t) {
-  return `claude -p ${shq(promptTarefa(plan, t))} --model ${shq(t.model)} --effort ${t.esforcoCli} "\${CLAUDE_FLAGS[@]}"`;
-}
+// nome de função bash a partir do id da faixa (faixa-1 → faixa_1)
+const fn = (id) => id.replace(/-/g, '_');
 
 export function renderPlanoSh(plan) {
   const L = [];
-  L.push('#!/usr/bin/env bash');
-  L.push(`# executar-tarefas.sh — gerado por \`onp-spec plano ${plan.feature}\` em ${plan.geradoEm}`);
-  L.push('# NÃO edite à mão: mudou tasks.md ou a config, regenere o plano.');
-  L.push('#');
-  L.push('# O que este script faz, na ordem:');
-  L.push('#   1. valida o ambiente (git limpo, claude CLI, node, spec commitada)');
-  L.push(`#   2. garante a branch de trabalho ${plan.branchTrabalho}`);
-  L.push('#   3. por onda: 1 worktree + 1 branch por faixa, e `claude -p` em');
-  L.push('#      paralelo — cada faixa numa janela de contexto LIMPA');
-  L.push('#   4. mescla cada faixa de volta (--no-ff) e marca as tarefas [concluida]');
-  L.push('#   5. tarefas sem Arquivos: rodam uma a uma na árvore principal');
-  L.push(`#   6. gate final: onp-spec verify ${plan.feature} + onp-spec audit --ci`);
-  L.push('set -u');
-  L.push('set -o pipefail');
-  L.push('');
-  L.push(`FEATURE=${shq(plan.feature)}`);
-  L.push(`BASE_BRANCH=${shq(plan.branchTrabalho)}`);
-  L.push(`ENGINE=${shq(plan.engine)}`);
-  L.push(`CLAUDE_FLAGS=(--permission-mode ${plan.cfg.permissionMode} --allowedTools ${shq(allowedTools(plan))})`);
-  L.push('FALHAS=""');
-  L.push('');
-  L.push(`verde()    { printf '\\033[32m%s\\033[0m\\n' "$*"; }`);
-  L.push(`vermelho() { printf '\\033[31m%s\\033[0m\\n' "$*"; }`);
-  L.push(`info()     { printf '· %s\\n' "$*"; }`);
-  L.push('falhar()   { vermelho "✘ $*"; exit 1; }');
-  L.push('# trilha de eventos para o painel ao vivo (`onp-spec painel <feature>`)');
-  L.push(`evento()   { [ -n "\${EVENTOS:-}" ] && printf '%s|%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$EVENTOS"; }`);
-  L.push('');
-  L.push('# ── 1. ambiente ──────────────────────────────────────────────────');
-  L.push('command -v git >/dev/null 2>&1 || falhar "git não encontrado"');
-  L.push('command -v node >/dev/null 2>&1 || falhar "node não encontrado"');
-  L.push('command -v claude >/dev/null 2>&1 || falhar "Claude Code CLI (claude) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
-  L.push('TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || falhar "fora de um repositório git"');
-  L.push('cd "$TOPLEVEL" || exit 1');
-  L.push('# artefatos recém-gerados pelo `onp-spec plano` são sujeira esperada:');
-  L.push('# se forem a ÚNICA sujeira, o script mesmo commita; qualquer outra, aborta');
-  L.push('if [ -n "$(git status --porcelain)" ]; then');
-  L.push(`  if [ -z "$(git status --porcelain | grep -v -e 'plano-execucao\\.' -e 'plano\\.json' -e 'executar-tarefas\\.sh')" ]; then`);
-  L.push('    git add -A');
-  L.push('    git commit -q -m "plano de execução: $FEATURE (artefatos gerados)"');
-  L.push('    info "artefatos do plano commitados"');
-  L.push('  else');
-  L.push('    falhar "árvore suja além dos artefatos do plano — commite ou faça git stash antes (os worktrees partem do último commit)"');
-  L.push('  fi');
-  L.push('fi');
-  L.push(`git ls-files --error-unmatch -- ${shq(`${plan.baseDir}/spec.md`)} >/dev/null 2>&1 || falhar "spec.md não está commitada — os worktrees das faixas precisam dela no git"`);
-  L.push('ATUAL=$(git rev-parse --abbrev-ref HEAD)');
-  L.push('[ "$ATUAL" != "HEAD" ] || falhar "HEAD destacado — troque para uma branch"');
-  L.push('');
-  L.push('# ── 2. branch de trabalho ────────────────────────────────────────');
-  L.push('if [ "$ATUAL" != "$BASE_BRANCH" ]; then');
-  L.push('  if git show-ref --verify --quiet "refs/heads/$BASE_BRANCH"; then');
-  L.push('    git checkout -q "$BASE_BRANCH" || falhar "não consegui trocar para $BASE_BRANCH"');
-  L.push('  else');
-  L.push('    git checkout -q -b "$BASE_BRANCH" || falhar "não consegui criar $BASE_BRANCH"');
-  L.push('  fi');
-  L.push('  info "branch de trabalho: $BASE_BRANCH (a partir de $ATUAL)"');
-  L.push('fi');
-  L.push('git worktree prune');
-  L.push(`LOG_DIR="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}-logs"`);
-  L.push('mkdir -p "$LOG_DIR"');
-  L.push('EVENTOS="$LOG_DIR/plano-eventos.log"');
-  L.push(': > "$EVENTOS"');
-  L.push('evento "inicio|$FEATURE"');
-  L.push('info "logs por faixa em: $LOG_DIR"');
-  L.push(`info "acompanhe ao vivo: onp-spec painel ${plan.feature}"`);
-  L.push('');
-  L.push('mesclar_faixa() { # $1=faixa $2=branch $3=worktree $4=exit-da-faixa');
-  L.push('  if [ "$4" -ne 0 ]; then');
-  L.push('    evento "faixa|$1|falhou"');
-  L.push('    vermelho "✘ $1 falhou (log: $LOG_DIR/$1.log) — worktree mantido para inspeção: $3"');
-  L.push('    FALHAS="$FALHAS $1"; return 1');
-  L.push('  fi');
-  L.push('  if git merge --no-ff "$2" -m "merge $1 ($FEATURE)"; then');
-  L.push('    git worktree remove --force "$3" >/dev/null 2>&1');
-  L.push('    git branch -d "$2" >/dev/null 2>&1');
-  L.push('    evento "faixa|$1|mesclada"');
-  L.push('    verde "✔ $1 mesclada em $BASE_BRANCH"');
-  L.push('  else');
-  L.push('    git merge --abort >/dev/null 2>&1');
-  L.push('    evento "faixa|$1|conflito"');
-  L.push('    vermelho "✘ conflito ao mesclar $1 — resolva na mão: git merge $2 (worktree mantido: $3)"');
-  L.push('    FALHAS="$FALHAS $1"; return 1');
-  L.push('  fi');
-  L.push('}');
+  const P = (...linhas) => L.push(...linhas);
 
-  plan.ondas.forEach((onda, oi) => {
-    L.push('');
-    L.push(`# ── onda ${oi + 1}: ${onda.map((fx) => `${fx.id} (${fx.tasks.map((t) => t.id).join(', ')})`).join(' ∥ ')} ──`);
-    L.push(`evento "onda|${oi + 1}|inicio"`);
-    L.push(`info "onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')} — janelas limpas em paralelo"`);
-    for (const fx of onda) {
-      const wt = `WT_${fx.id.replace('-', '_').toUpperCase()}`;
-      L.push(`${wt}="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}-${fx.id}"`);
-      L.push(`git worktree add "$${wt}" -b ${shq(fx.branch)} >/dev/null || falhar "worktree da ${fx.id} (sobrou de uma execução anterior? git worktree prune + apague ${fx.worktree})"`);
-      L.push(`evento "faixa|${fx.id}|executando"`);
-      L.push('(');
-      L.push(`  cd "$${wt}" || exit 9`);
-      fx.tasks.forEach((t, ti) => {
-        L.push(`  ${ti > 0 ? '&& ' : ''}${chamadaClaude(plan, t)} \\`);
-      });
-      // fecha o encadeamento (a última linha termina sem \)
-      L[L.length - 1] = L[L.length - 1].replace(/ \\$/, '');
-      L.push(`) > "$LOG_DIR/${fx.id}.log" 2>&1 &`);
-      L.push(`PID_${fx.id.replace('-', '_').toUpperCase()}=$!`);
-    }
-    for (const fx of onda) {
-      const up = fx.id.replace('-', '_').toUpperCase();
-      L.push(`wait "$PID_${up}"; ST_${up}=$?`);
-      L.push(`evento "faixa|${fx.id}|exit|$ST_${up}"`);
-    }
-    for (const fx of onda) {
-      const up = fx.id.replace('-', '_').toUpperCase();
-      L.push(`if mesclar_faixa ${shq(fx.id)} ${shq(fx.branch)} "$WT_${up}" "$ST_${up}"; then`);
-      for (const t of fx.tasks) {
-        L.push(`  node "$ENGINE" tarefa "$FEATURE" ${t.id} concluida || true`);
-        L.push(`  evento "tarefa|${t.id}|concluida"`);
-      }
-      L.push('fi');
-    }
-  });
+  P('#!/usr/bin/env bash');
+  P(`# executar-tarefas.sh — gerado por \`onp-spec plano ${plan.feature}\` em ${plan.geradoEm}`);
+  P('# NÃO edite à mão: mudou tasks.md ou a config, regenere o plano.');
+  P('#');
+  P('# uso:');
+  P('#   bash executar-tarefas.sh                  tudo (ondas → sequenciais → gate)');
+  P('#   bash executar-tarefas.sh --faixa <id>     reexecuta UMA faixa (+ merge + gate)');
+  P('#   bash executar-tarefas.sh --seq <T-xxx>    reexecuta UMA tarefa sequencial');
+  P('#   bash executar-tarefas.sh --gate           só o gate (verify + audit)');
+  P('#   bash executar-tarefas.sh --listar         mostra faixas, tarefas e estados');
+  P('#   (acrescente --sem-gate para não rodar o gate ao final)');
+  P('#');
+  P(`# acompanhe ao vivo: onp-spec painel ${plan.feature}`);
+  P('set -u');
+  P('set -o pipefail');
+  P('');
+  P(`RUN_ID=${shq(plan.runId)}`);
+  P(`FEATURE=${shq(plan.feature)}`);
+  P(`BASE_BRANCH=${shq(plan.branchTrabalho)}`);
+  P(`ENGINE=${shq(plan.engine)}`);
+  P(`CLAUDE_FLAGS=(--permission-mode ${plan.cfg.permissionMode} --allowedTools ${shq(allowedTools(plan))})`);
+  P('STREAM_FLAGS=(--output-format stream-json --verbose)');
+  P('FALHAS=""');
+  P('COM_GATE=1');
+  P('');
+  P(`verde()    { printf '\\033[32m%s\\033[0m\\n' "$*"; }`);
+  P(`vermelho() { printf '\\033[31m%s\\033[0m\\n' "$*"; }`);
+  P(`amarelo()  { printf '\\033[33m%s\\033[0m\\n' "$*"; }`);
+  P(`info()     { printf '· %s\\n' "$*"; }`);
+  P('falhar()   { vermelho "✘ $*"; exit 1; }');
+  P('');
+  P('# eventos vão para o ledger GLOBAL (~/.onp-spec/painel/ledger.jsonl):');
+  P('# um arquivo para todos os projetos, é o que o painel lê');
+  P('evento() { node "$ENGINE" evento --run "$RUN_ID" "$@" >/dev/null 2>&1 || true; }');
+  P('');
+  P('# ── ambiente (todos os modos passam por aqui) ────────────────────────');
+  P('preparar_ambiente() {');
+  P('  command -v git >/dev/null 2>&1 || falhar "git não encontrado"');
+  P('  command -v node >/dev/null 2>&1 || falhar "node não encontrado"');
+  P('  command -v claude >/dev/null 2>&1 || falhar "Claude Code CLI (claude) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
+  P('  TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || falhar "fora de um repositório git"');
+  P('  cd "$TOPLEVEL" || exit 1');
+  P('  # artefatos recém-gerados pelo `onp-spec plano` são sujeira esperada:');
+  P('  # se forem a ÚNICA sujeira, o script mesmo commita; qualquer outra, aborta');
+  P('  if [ -n "$(git status --porcelain)" ]; then');
+  P(`    if [ -z "$(git status --porcelain | grep -v -e 'plano-execucao\\.' -e 'plano\\.json' -e 'executar-tarefas\\.sh')" ]; then`);
+  P('      git add -A');
+  P('      git commit -q -m "plano de execução: $FEATURE (artefatos gerados)"');
+  P('      info "artefatos do plano commitados"');
+  P('    else');
+  P('      falhar "árvore suja além dos artefatos do plano — commite ou faça git stash antes (os worktrees partem do último commit)"');
+  P('    fi');
+  P('  fi');
+  P(`  git ls-files --error-unmatch -- ${shq(`${plan.baseDir}/spec.md`)} >/dev/null 2>&1 || falhar "spec.md não está commitada — os worktrees das faixas precisam dela no git"`);
+  P('  ATUAL=$(git rev-parse --abbrev-ref HEAD)');
+  P('  [ "$ATUAL" != "HEAD" ] || falhar "HEAD destacado — troque para uma branch"');
+  P('  if [ "$ATUAL" != "$BASE_BRANCH" ]; then');
+  P('    if git show-ref --verify --quiet "refs/heads/$BASE_BRANCH"; then');
+  P('      git checkout -q "$BASE_BRANCH" || falhar "não consegui trocar para $BASE_BRANCH"');
+  P('    else');
+  P('      git checkout -q -b "$BASE_BRANCH" || falhar "não consegui criar $BASE_BRANCH"');
+  P('    fi');
+  P('    info "branch de trabalho: $BASE_BRANCH (a partir de $ATUAL)"');
+  P('  fi');
+  P('  git worktree prune');
+  P(`  LOG_DIR="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}-logs"`);
+  P(`  WT_BASE="$(dirname "$TOPLEVEL")/onp-worktrees/${plan.repoName}-${plan.feature}"`);
+  P('  STREAMS_DIR="${ONP_SPEC_HOME:-$HOME/.onp-spec}/painel/streams/$RUN_ID"');
+  P('  mkdir -p "$LOG_DIR" "$STREAMS_DIR"');
+  P('}');
+  P('');
+  P('# worktree limpo mesmo depois de uma tentativa que falhou');
+  P('preparar_worktree() { # $1=faixa $2=branch $3=worktree');
+  P('  git worktree prune');
+  P('  if [ -e "$3" ]; then git worktree remove --force "$3" >/dev/null 2>&1; rm -rf "$3"; fi');
+  P('  if git show-ref --verify --quiet "refs/heads/$2"; then git branch -D "$2" >/dev/null 2>&1; fi');
+  P('  git worktree add "$3" -b "$2" >/dev/null 2>&1 || { vermelho "✘ não consegui criar o worktree de $1 em $3"; return 1; }');
+  P('}');
+  P('');
+  P('tentativa() { # $1=faixa — conta reexecuções para o painel mostrar');
+  P('  local arq="$LOG_DIR/.tentativa-$1"');
+  P('  local n=1');
+  P('  [ -f "$arq" ] && n=$(( $(cat "$arq") + 1 ))');
+  P('  printf "%s" "$n" > "$arq"');
+  P('  printf "%s" "$n"');
+  P('}');
+  P('');
+  P('# uma tarefa = uma sessão claude headless com contexto limpo.');
+  P('# o NDJSON do stream-json vira o stream da tarefa (o painel mostra ao vivo)');
+  P('rodar_tarefa() { # $1=escopo(faixa|seq) $2=T-xxx $3=prompt $4=modelo $5=esforço');
+  P('  local chave="$1--$2"');
+  P('  local stream="$STREAMS_DIR/$chave.jsonl"');
+  P('  evento --tipo tarefa --tarefa "$2" --faixa "$1" --estado executando --stream "$chave"');
+  P('  info "$2 — claude -p ($4 · $5) · stream: $chave"');
+  P('  if claude -p "$3" --model "$4" --effort "$5" "${STREAM_FLAGS[@]}" "${CLAUDE_FLAGS[@]}" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
+  P('    evento --tipo tarefa --tarefa "$2" --faixa "$1" --estado concluida --stream "$chave"');
+  P('    node "$ENGINE" stream-resumo "$RUN_ID" "$chave" 2>/dev/null || true');
+  P('    return 0');
+  P('  fi');
+  P('  evento --tipo tarefa --tarefa "$2" --faixa "$1" --estado falhou --stream "$chave"');
+  P('  node "$ENGINE" stream-resumo "$RUN_ID" "$chave" 2>/dev/null || true');
+  P('  return 1');
+  P('}');
+  P('');
+  P('mesclar_faixa() { # $1=faixa $2=branch $3=worktree $4=exit-da-faixa');
+  P('  if [ "$4" -ne 0 ]; then');
+  P('    evento --tipo faixa --faixa "$1" --estado falhou');
+  P('    vermelho "✘ $1 falhou (log: $LOG_DIR/$1.log) — worktree mantido para inspeção: $3"');
+  P(`    amarelo "  reexecute só ela: bash ${plan.baseDir}/executar-tarefas.sh --faixa $1"`);
+  P('    FALHAS="$FALHAS $1"; return 1');
+  P('  fi');
+  P('  evento --tipo faixa --faixa "$1" --estado mesclando');
+  P('  if git merge --no-ff "$2" -m "merge $1 ($FEATURE)"; then');
+  P('    git worktree remove --force "$3" >/dev/null 2>&1');
+  P('    git branch -d "$2" >/dev/null 2>&1');
+  P('    evento --tipo faixa --faixa "$1" --estado mesclada');
+  P('    verde "✔ $1 mesclada em $BASE_BRANCH"');
+  P('  else');
+  P('    git merge --abort >/dev/null 2>&1');
+  P('    evento --tipo faixa --faixa "$1" --estado conflito');
+  P('    vermelho "✘ conflito ao mesclar $1 — resolva na mão: git merge $2 (worktree mantido: $3)"');
+  P('    FALHAS="$FALHAS $1"; return 1');
+  P('  fi');
+  P('}');
+  P('');
+  P('marcar_concluidas() { # $@=T-xxx');
+  P('  for t in "$@"; do node "$ENGINE" tarefa "$FEATURE" "$t" concluida >/dev/null || true; done');
+  P('}');
 
-  if (plan.sequenciais.length) {
-    L.push('');
-    L.push('# ── tarefas sequenciais (árvore principal) ───────────────────────');
-    for (const t of plan.sequenciais) {
-      L.push(`info ${shq(`sequencial ${t.id} — ${t.title}`)} "(log: $LOG_DIR/${t.id}.log)"`);
-      L.push(`evento "seq|${t.id}|executando"`);
-      L.push(`if ${chamadaClaude(plan, t)} > "$LOG_DIR/${t.id}.log" 2>&1; then`);
-      L.push('  # commit de segurança se o agente esqueceu (rastreabilidade > perfeição)');
-      L.push('  if [ -n "$(git status --porcelain)" ]; then');
-      L.push(`    git add -A && git commit -q -m ${shq(`${t.id} ${plan.feature}: ${t.title} (auto-commit do plano)`)}`);
-      L.push('  fi');
-      L.push(`  node "$ENGINE" tarefa "$FEATURE" ${t.id} concluida || true`);
-      L.push(`  evento "seq|${t.id}|concluida"`);
-      L.push(`  verde "✔ ${t.id} concluída"`);
-      L.push('else');
-      L.push(`  evento "seq|${t.id}|falhou"`);
-      L.push(`  vermelho "✘ ${t.id} falhou (log: $LOG_DIR/${t.id}.log)"; FALHAS="$FALHAS ${t.id}"`);
-      L.push('fi');
-    }
+  // ── uma função por faixa ────────────────────────────────────────────────
+  for (const fx of plan.faixas) {
+    const ids = fx.tasks.map((t) => t.id).join(' ');
+    P('');
+    P(`# ── ${fx.id}: ${ids} ──`);
+    P(`executar_${fn(fx.id)}() {`);
+    P(`  local WT="$WT_BASE-${fx.id}"`);
+    P(`  preparar_worktree ${shq(fx.id)} ${shq(fx.branch)} "$WT" || return 1`);
+    P(`  evento --tipo faixa --faixa ${shq(fx.id)} --estado executando --tentativa "$(tentativa ${shq(fx.id)})"`);
+    P(`  : > "$LOG_DIR/${fx.id}.log"`);
+    P('  (');
+    P('    cd "$WT" || exit 9');
+    fx.tasks.forEach((t, i) => {
+      const cont = i < fx.tasks.length - 1 ? ' &&' : '';
+      P(`    rodar_tarefa ${shq(fx.id)} ${shq(t.id)} ${shq(promptTarefa(plan, t))} ${shq(t.model)} ${t.esforcoCli}${cont}`);
+    });
+    P(`  ) >> "$LOG_DIR/${fx.id}.log" 2>&1`);
+    P('  local st=$?');
+    P(`  mesclar_faixa ${shq(fx.id)} ${shq(fx.branch)} "$WT" "$st" || return 1`);
+    P(`  marcar_concluidas ${ids}`);
+    P('  return 0');
+    P('}');
   }
 
-  L.push('');
-  L.push('# ── gate final: quem decide é a máquina ──────────────────────────');
-  L.push('echo');
-  L.push('info "gate final: verify + audit --ci"');
-  L.push('evento "gate|inicio"');
-  L.push('node "$ENGINE" verify "$FEATURE"');
-  L.push('evento "gate|verify|$?"');
-  L.push('node "$ENGINE" audit --ci');
-  L.push('AUDIT=$?');
-  L.push('evento "gate|audit|$AUDIT"');
-  L.push('# fecha a contabilidade: status das tarefas + prova do verify no git');
-  L.push(`if [ -n "$(git status --porcelain -- ${shq(plan.specDir)})" ]; then`);
-  L.push(`  git add -A -- ${shq(plan.specDir)}`);
-  L.push('  git commit -q -m "$FEATURE: status das tarefas + prova do verify (plano)"');
-  L.push('  info "status das tarefas e prova do verify commitados"');
-  L.push('fi');
-  L.push('echo');
-  L.push('if [ -n "$FALHAS" ]; then vermelho "faixas/tarefas com falha:$FALHAS"; fi');
-  L.push('if [ "$AUDIT" -eq 0 ] && [ -z "$FALHAS" ]; then');
-  L.push('  evento "fim|0"');
-  L.push('  verde "✔ plano concluído — especificação e código alinhados (audit exit 0) na branch $BASE_BRANCH"');
-  L.push('  info "próximo passo: revise e leve para a main quando quiser (git merge $BASE_BRANCH)"');
-  L.push('  exit 0');
-  L.push('fi');
-  L.push('evento "fim|1"');
-  L.push('vermelho "plano terminou com pendências — leia a saída do audit acima e os logs em $LOG_DIR"');
-  L.push('exit 1');
+  // ── uma função por tarefa sequencial ────────────────────────────────────
+  for (const t of plan.sequenciais) {
+    P('');
+    P(`# ── sequencial ${t.id} (sem Arquivos: — pegada desconhecida) ──`);
+    P(`executar_seq_${fn(t.id)}() {`);
+    P(`  info ${shq(`sequencial ${t.id} — ${t.title}`)}`);
+    P(`  if rodar_tarefa seq ${shq(t.id)} ${shq(promptTarefa(plan, t))} ${shq(t.model)} ${t.esforcoCli} >> "$LOG_DIR/seq.log" 2>&1; then`);
+    P('    # commit de segurança se o agente esqueceu (rastreabilidade > perfeição)');
+    P('    if [ -n "$(git status --porcelain)" ]; then');
+    P(`      git add -A && git commit -q -m ${shq(`${t.id} ${plan.feature}: ${t.title} (auto-commit do plano)`)}`);
+    P('    fi');
+    P(`    marcar_concluidas ${t.id}`);
+    P(`    verde "✔ ${t.id} concluída"`);
+    P('    return 0');
+    P('  fi');
+    P(`  vermelho "✘ ${t.id} falhou (log: $LOG_DIR/seq.log)"`);
+    P(`  amarelo "  reexecute só ela: bash ${plan.baseDir}/executar-tarefas.sh --seq ${t.id}"`);
+    P(`  FALHAS="$FALHAS ${t.id}"`);
+    P('  return 1');
+    P('}');
+  }
+
+  // ── gate ────────────────────────────────────────────────────────────────
+  P('');
+  P('# ── gate: quem decide é a máquina ────────────────────────────────────');
+  P('rodar_gate() {');
+  P('  echo');
+  P('  info "gate: verify + audit --ci"');
+  P('  evento --tipo gate --etapa inicio');
+  P('  node "$ENGINE" verify "$FEATURE"');
+  P('  local v=$?');
+  P('  evento --tipo gate --etapa verify --exit "$v"');
+  P('  node "$ENGINE" audit --ci');
+  P('  AUDIT=$?');
+  P('  evento --tipo gate --etapa audit --exit "$AUDIT"');
+  P('  # fecha a contabilidade: status das tarefas + prova do verify no git');
+  P(`  if [ -n "$(git status --porcelain -- ${shq(plan.specDir)})" ]; then`);
+  P(`    git add -A -- ${shq(plan.specDir)}`);
+  P('    git commit -q -m "$FEATURE: status das tarefas + prova do verify (plano)"');
+  P('    info "status das tarefas e prova do verify commitados"');
+  P('  fi');
+  P('  return "$AUDIT"');
+  P('}');
+  P('');
+  P('encerrar() { # $1=escopo');
+  P('  echo');
+  P('  if [ -n "$FALHAS" ]; then vermelho "faixas/tarefas com falha:$FALHAS"; fi');
+  P('  # sem gate não existe veredito: NUNCA anunciar alinhamento sem o audit');
+  P('  if [ "$COM_GATE" -eq 0 ]; then');
+  P('    evento --tipo fim --exit 1 --escopo "$1"');
+  P('    if [ -z "$FALHAS" ]; then');
+  P('      amarelo "○ trabalho de \'$1\' terminou SEM o gate (--sem-gate) — isto NÃO é prova de nada"');
+  P(`      amarelo "  para o veredito: bash ${plan.baseDir}/executar-tarefas.sh --gate"`);
+  P('      exit 0');
+  P('    fi');
+  P('    vermelho "e ainda há falhas — conserte e rode o gate"');
+  P('    exit 1');
+  P('  fi');
+  P('  rodar_gate');
+  P('  local audit=$?');
+  P('  if [ "$audit" -eq 0 ] && [ -z "$FALHAS" ]; then');
+  P('    evento --tipo fim --exit 0 --escopo "$1"');
+  P('    verde "✔ plano concluído — especificação e código alinhados (audit exit 0) na branch $BASE_BRANCH"');
+  P('    info "próximo passo: revise e leve para a main quando quiser (git merge $BASE_BRANCH)"');
+  P('    exit 0');
+  P('  fi');
+  P('  evento --tipo fim --exit 1 --escopo "$1"');
+  P('  vermelho "plano terminou com pendências — leia a saída do audit acima e os logs em $LOG_DIR"');
+  P(`  amarelo "dica: reexecute só o que falhou (--faixa <id> / --seq <T-xxx>) e acompanhe em: onp-spec painel ${plan.feature}"`);
+  P('  exit 1');
+  P('}');
+
+  // ── modo: tudo ──────────────────────────────────────────────────────────
+  P('');
+  P('executar_tudo() {');
+  P('  evento --tipo inicio --escopo tudo');
+  P('  info "logs por faixa em: $LOG_DIR"');
+  P(`  info "acompanhe ao vivo: onp-spec painel ${plan.feature}"`);
+  plan.ondas.forEach((onda, oi) => {
+    P(`  # onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')}`);
+    P(`  info "onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')} — janelas limpas em paralelo"`);
+    for (const fx of onda) {
+      P(`  executar_${fn(fx.id)} & PID_${fn(fx.id).toUpperCase()}=$!`);
+    }
+    for (const fx of onda) {
+      P(`  wait "$PID_${fn(fx.id).toUpperCase()}" || true`);
+    }
+  });
+  for (const t of plan.sequenciais) P(`  executar_seq_${fn(t.id)} || true`);
+  P('  encerrar tudo');
+  P('}');
+
+  // ── dispatcher ──────────────────────────────────────────────────────────
+  P('');
+  P('listar() {');
+  P(`  echo "execução: $RUN_ID (feature $FEATURE, branch $BASE_BRANCH)"`);
+  plan.ondas.forEach((onda, oi) => {
+    for (const fx of onda) {
+      P(`  echo "  ${fx.id}  onda ${oi + 1}  ${fx.tasks.map((t) => t.id).join(', ')}"`);
+    }
+  });
+  for (const t of plan.sequenciais) P(`  echo "  seq       ${t.id} (sequencial)"`);
+  P('  echo');
+  P('  echo "reexecutar uma faixa:    --faixa <id>"');
+  P('  echo "reexecutar sequencial:   --seq <T-xxx>"');
+  P('  echo "só o gate:               --gate"');
+  P('}');
+  P('');
+  P('MODO="tudo"');
+  P('ALVO=""');
+  P('while [ $# -gt 0 ]; do');
+  P('  case "$1" in');
+  P('    --listar) MODO="listar" ;;');
+  P('    --gate) MODO="gate" ;;');
+  P('    --sem-gate) COM_GATE=0 ;;');
+  P('    --faixa) MODO="faixa"; ALVO="${2:-}"; shift ;;');
+  P('    --seq) MODO="seq"; ALVO="${2:-}"; shift ;;');
+  P('    -h|--help) sed -n "2,14p" "$0"; exit 0 ;;');
+  P('    *) vermelho "argumento desconhecido: $1"; sed -n "2,14p" "$0"; exit 2 ;;');
+  P('  esac');
+  P('  shift');
+  P('done');
+  P('');
+  P('if [ "$MODO" = "listar" ]; then listar; exit 0; fi');
+  P('');
+  P('preparar_ambiente');
+  P('');
+  P('case "$MODO" in');
+  P('  tudo) executar_tudo ;;');
+  P('  gate) COM_GATE=1; encerrar gate ;;');
+  P('  faixa)');
+  P('    case "$ALVO" in');
+  for (const fx of plan.faixas) {
+    P(`      ${fx.id}) evento --tipo inicio --escopo "faixa:${fx.id}"; executar_${fn(fx.id)} || true; encerrar "faixa:${fx.id}" ;;`);
+  }
+  P('      *) falhar "faixa desconhecida: \'$ALVO\' — veja as disponíveis com --listar" ;;');
+  P('    esac ;;');
+  P('  seq)');
+  P('    case "$ALVO" in');
+  for (const t of plan.sequenciais) {
+    P(`      ${t.id}) evento --tipo inicio --escopo "seq:${t.id}"; executar_seq_${fn(t.id)} || true; encerrar "seq:${t.id}" ;;`);
+  }
+  P(`      *) falhar "tarefa sequencial desconhecida: '$ALVO' — veja as disponíveis com --listar" ;;`);
+  P('    esac ;;');
+  P('esac');
+
   return `${L.join('\n')}\n`;
 }
-
 // ── artefato: plano-execucao.html (só claude) ──────────────────────────────
 
 const esc = (s) =>

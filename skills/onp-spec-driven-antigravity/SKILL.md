@@ -4,7 +4,7 @@ description: Desenvolvimento spec-anchored nativo para Antigravity — a especif
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.2.0
+  version: 3.3.0
   agent: antigravity
 ---
 
@@ -198,10 +198,14 @@ listas no plano.
   Esta skill NUNCA depende do CLI do Claude — isso é da skill irmã do Claude
   Code.
 - **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
-  em background (terminal) e entregue a URL — um painel local no navegador
-  refletindo em tempo real o tasks.md, as provas do verify e o gate enquanto
-  os agentes das faixas trabalham. No Antigravity o painel é modo
-  acompanhamento (quem executa são os agentes nativos, não o botão).
+  em background (terminal) e entregue a URL — um painel local no navegador com
+  a árvore projeto → execução → faixa → tarefa refletindo em tempo real o
+  tasks.md, as provas do verify e o gate enquanto os agentes das faixas
+  trabalham. `onp-spec painel` sem feature mostra TODOS os projetos de uma vez
+  (ledger único em `~/.onp-spec/painel/ledger.jsonl`). No Antigravity o painel
+  é modo acompanhamento: quem executa são os agentes nativos, não um botão.
+- **Marque o progresso no ledger** para o painel refletir o que seus agentes
+  fazem: `onp-spec tarefa <feature> <T-xxx> concluida` ao terminar cada uma.
 - Feature pequena ou usuário quer simples? Execute as faixas você mesmo, em
   sequência — o plano continua valendo como roteiro de branches e commits.
 
@@ -284,7 +288,8 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
 - **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
-- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>`.
+- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>` (ou
+  `onp-spec painel` para todos os projetos de uma vez).
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

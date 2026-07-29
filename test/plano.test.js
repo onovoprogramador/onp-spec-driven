@@ -157,25 +157,61 @@ test('md (antigravity): worktrees, prompt por faixa, sem claude CLI', () => {
   assert.doesNotMatch(md, /claude -p/, 'plano do Antigravity não pode depender do CLI do Claude');
 });
 
-test('sh: claude -p com model/effort por tarefa, worktrees, merge e gate final', () => {
+test('sh: claude -p com model/effort por tarefa, stream-json, worktrees e merge', () => {
   const sh = renderPlanoSh(planPadrao('claude'));
   assert.match(sh, /^#!\/usr\/bin\/env bash/);
-  assert.match(sh, /git worktree add "\$WT_FAIXA_1" -b 'spec\/pagamentos-faixa-1'/);
-  assert.match(sh, /claude -p '/);
-  assert.match(sh, /--model 'claude-sonnet-5' --effort medium/);
-  assert.match(sh, /--effort high/); // T-002 com esforço alto
+  assert.match(sh, /claude -p "\$3" --model "\$4" --effort "\$5" "\$\{STREAM_FLAGS\[@\]}"/);
+  assert.match(sh, /STREAM_FLAGS=\(--output-format stream-json --verbose\)/);
+  // o prompt vai inline (multilinha) entre a tarefa e o modelo/esforço
+  assert.match(sh, /rodar_tarefa 'faixa-1' 'T-001' '[\s\S]*?' 'claude-sonnet-5' medium/);
+  assert.match(sh, /rodar_tarefa 'faixa-2' 'T-002' '[\s\S]*?' 'claude-sonnet-5' high/); // esforço alto da tarefa
   assert.match(sh, /--permission-mode acceptEdits/);
   assert.match(sh, /Bash\(node:\*\)/); // allowedTools derivada do testCommand
+  assert.match(sh, /git worktree add "\$3" -b/);
   assert.match(sh, /mesclar_faixa 'faixa-1'/);
-  assert.match(sh, /tarefa "\$FEATURE" T-001 concluida/);
+  assert.match(sh, /marcar_concluidas T-001/); // T-003 não tem Arquivos: → sequencial
   assert.match(sh, /audit --ci/);
-  // tarefa sem arquivos roda sequencial na árvore principal
-  assert.match(sh, /sequencial T-003/);
-  // trilha de eventos para o painel ao vivo
-  assert.match(sh, /plano-eventos\.log/);
-  assert.match(sh, /evento "faixa\|faixa-1\|executando"/);
-  assert.match(sh, /evento "gate\|audit\|\$AUDIT"/);
-  assert.match(sh, /evento "fim\|0"/);
+  assert.match(sh, /executar_seq_T_003/); // tarefa sem arquivos vira função própria
+  // eventos para o ledger global (o painel ao vivo lê deles)
+  assert.match(sh, /evento\(\) \{ node "\$ENGINE" evento --run "\$RUN_ID"/);
+  assert.match(sh, /evento --tipo faixa --faixa 'faixa-1' --estado executando/);
+  assert.match(sh, /evento --tipo gate --etapa audit --exit "\$AUDIT"/);
+  assert.match(sh, /RUN_ID='repo-x-pagamentos/);
+});
+
+test('sh: dispatcher permite reexecutar UMA faixa, UMA sequencial, ou só o gate', () => {
+  const sh = renderPlanoSh(planPadrao('claude'));
+  // uma função por faixa e por sequencial = alvo isolável
+  assert.match(sh, /executar_faixa_1\(\) \{/);
+  assert.match(sh, /executar_faixa_2\(\) \{/);
+  assert.match(sh, /executar_seq_T_003\(\) \{/);
+  // parsing de argumentos
+  assert.match(sh, /--faixa\) MODO="faixa"; ALVO="\$\{2:-}"; shift ;;/);
+  assert.match(sh, /--seq\) MODO="seq"/);
+  assert.match(sh, /--gate\) MODO="gate"/);
+  assert.match(sh, /--listar\) MODO="listar"/);
+  assert.match(sh, /--sem-gate\) COM_GATE=0/);
+  // despacho por alvo, com faixa desconhecida barrada
+  assert.match(sh, /faixa-1\) evento --tipo inicio --escopo "faixa:faixa-1"; executar_faixa_1/);
+  assert.match(sh, /falhar "faixa desconhecida/);
+  assert.match(sh, /falhar "tarefa sequencial desconhecida/);
+  // worktree de tentativa anterior é limpo antes de recriar
+  assert.match(sh, /git worktree remove --force "\$3"/);
+  assert.match(sh, /git branch -D "\$2"/);
+  assert.match(sh, /tentativa\(\)/);
+  // a dica de reexecução aparece quando algo falha
+  assert.match(sh, /reexecute só ela: bash .*--faixa \$1/);
+});
+
+test('sh: --sem-gate NUNCA anuncia alinhamento (não existe prova sem audit)', () => {
+  const sh = renderPlanoSh(planPadrao('claude'));
+  const semGate = sh.slice(sh.indexOf('if [ "$COM_GATE" -eq 0 ]'), sh.indexOf('rodar_gate\n  local audit'));
+  assert.match(semGate, /NÃO é prova de nada/);
+  assert.doesNotMatch(semGate, /audit exit 0/, 'sem rodar o audit, nada de dizer que saiu 0');
+  assert.match(semGate, /evento --tipo fim --exit 1/, 'ledger registra que não houve veredito');
+  // a frase de alinhamento só existe no caminho que roda o gate
+  const comGate = sh.slice(sh.indexOf('rodar_gate\n  local audit'));
+  assert.match(comGate, /audit exit 0/);
 });
 
 test('plano.json: estrutura de máquina para o painel e outras ferramentas', async () => {

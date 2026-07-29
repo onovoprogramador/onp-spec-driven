@@ -14,10 +14,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(__dirname, '..', 'bin', 'onp-spec.js');
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'onpspec-agents-'));
+// ledger em pasta própria: teste NUNCA escreve no ~/.onp-spec do usuário
+const homeOnp = path.join(root, '.onp-home');
 after(() => rmSync(root, { recursive: true, force: true }));
 
 function cli(...args) {
-  const proc = spawnSync('node', [BIN, ...args], { cwd: root, encoding: 'utf-8' });
+  const proc = spawnSync('node', [BIN, ...args], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
   return { code: proc.status, out: `${proc.stdout}\n${proc.stderr}` };
 }
 
@@ -132,8 +138,20 @@ test('plano (claude): gera md + sh executável com bash válido + html com botã
   const bashN = spawnSync('bash', ['-n', shPath], { encoding: 'utf-8' });
   assert.equal(bashN.status, 0, `bash -n falhou: ${bashN.stderr}`);
   const sh = readFileSync(shPath, 'utf-8');
-  assert.match(sh, /--model 'claude-opus-5' --effort high/); // T-002 sobrescreve
+  assert.match(sh, /rodar_tarefa 'faixa-2' 'T-002' '[\s\S]*?' 'claude-opus-5' high/); // T-002 sobrescreve
+  assert.match(sh, /--output-format stream-json/); // stream do modelo p/ o painel
   assert.match(sh, /audit --ci/);
+
+  // o dispatcher precisa aceitar reexecução por faixa de verdade
+  const listar = spawnSync('bash', [shPath, '--listar'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(listar.status, 0, listar.stderr);
+  assert.match(listar.stdout, /faixa-1\s+onda 1\s+T-001, T-003/);
+  assert.match(listar.stdout, /faixa-2\s+onda 1\s+T-002/);
+  assert.match(listar.stdout, /reexecutar uma faixa/);
 
   const html = readFileSync(path.join(dir, 'plano-execucao.html'), 'utf-8');
   assert.match(html, /Executar todas as tarefas em janelas limpas e paralelas/);
