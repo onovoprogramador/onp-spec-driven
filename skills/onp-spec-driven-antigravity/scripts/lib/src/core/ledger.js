@@ -3,10 +3,11 @@
 //   ~/.onp-spec/painel/ledger.jsonl        (override: ONP_SPEC_HOME)
 //   ~/.onp-spec/painel/streams/<runId>/<chave>.jsonl
 //
-// Cada linha do ledger é um evento JSON. O painel lê esse arquivo único e
-// monta a árvore projeto → execução → faixa → tarefa, então funciona mesmo
-// com projetos diferentes rodando ao mesmo tempo (é a fonte de verdade
-// compartilhada; o repositório do usuário não guarda estado de execução).
+// Cada linha do ledger é um evento JSON. É a fonte de verdade compartilhada
+// do que está rodando: `onp-spec resumo` lê este arquivo único e monta a
+// árvore projeto → execução → faixa → tarefa, então funciona mesmo com
+// projetos diferentes rodando ao mesmo tempo (o repositório do usuário não
+// guarda estado de execução).
 //
 // Tipos de evento:
 //   plano  {runId, projeto, projetoDir, feature, agent, plano}
@@ -14,6 +15,8 @@
 //   tarefa {runId, tarefa, faixa, estado: executando|concluida|falhou, stream}
 //   gate   {runId, etapa: verify|audit, exit}
 //   fim    {runId, exit, escopo}
+//   resumo {runId, texto, origem: ia|motor} — o "resumo geral de andamento"
+//          que o executor grava a cada ~1 min e o agente repassa no chat
 //
 // O stream de cada tarefa é o NDJSON cru do `claude -p --output-format
 // stream-json` — o parser abaixo transforma em linha do tempo legível.
@@ -74,7 +77,7 @@ export function chaveStream(faixaOuSeq, tarefa) {
   return `${faixaOuSeq}--${tarefa}`;
 }
 
-// ── árvore consolidada (o que o painel desenha) ─────────────────────────────
+// ── árvore consolidada (o que o resumo narra) ───────────────────────────────
 
 export function montarArvore(eventos, { projetoDir = null, feature = null } = {}) {
   const execucoes = new Map();
@@ -106,6 +109,7 @@ export function montarArvore(eventos, { projetoDir = null, feature = null } = {}
         gateDesatualizado: false,
         fim: null,
         escopoUltimo: null,
+        resumo: null,
       });
       continue;
     }
@@ -138,6 +142,11 @@ export function montarArvore(eventos, { projetoDir = null, feature = null } = {}
     } else if (e.tipo === 'fim') {
       ex.fim = e.exit;
       ex.escopoUltimo = e.escopo || 'tudo';
+    } else if (e.tipo === 'resumo') {
+      // fica só o mais recente: é o texto que `onp-spec resumo` devolve
+      if (typeof e.texto === 'string' && e.texto.trim()) {
+        ex.resumo = { texto: e.texto, origem: e.origem === 'ia' ? 'ia' : 'motor', ts: e.ts };
+      }
     } else if (e.tipo === 'inicio') {
       ex.fim = null;
       ex.escopoUltimo = e.escopo || 'tudo';
@@ -245,7 +254,7 @@ function textoDeConteudo(conteudo) {
 }
 
 // Transforma o NDJSON cru numa linha do tempo. `desde` = linhas já lidas
-// (o painel pede incremental); devolve também o total para o próximo pedido.
+// (leitura incremental); devolve também o total para o próximo pedido.
 export function resumirStream(texto, { desde = 0 } = {}) {
   const linhas = String(texto || '').split('\n').filter((l) => l.trim());
   const novas = linhas.slice(desde);
@@ -326,7 +335,7 @@ export function lerStream(runId, chave, { desde = 0 } = {}) {
   return { ...resumirStream(readFileSync(caminho, 'utf-8'), { desde }), existe: true };
 }
 
-// streams gravados de uma execução (para o painel listar mesmo sem evento)
+// streams gravados de uma execução (diagnóstico, mesmo sem evento)
 export function streamsDaExecucao(runId) {
   const dir = path.join(caminhos().streams, runId);
   if (!existsSync(dir)) return [];

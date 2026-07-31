@@ -1,10 +1,10 @@
 ---
 name: onp-spec-driven
-description: Desenvolvimento spec-anchored nativo para Antigravity — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição verificável (preset LGPD/educação), lições aprendidas com lastro mecânico e plano de execução PARALELA (faixas em git worktrees executadas pelos agentes paralelos nativos do Antigravity). Integração com Artifacts (task.md, implementation_plan.md, walkthrough.md) e Slash Commands (/goal, /grill-me, /schedule, /learn). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas".
+description: Desenvolvimento spec-anchored nativo para Antigravity — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição verificável (preset LGPD/educação), lições aprendidas com lastro mecânico e plano de execução com PARALELISMO OPCIONAL: o agente apresenta o plano recomendado e SEMPRE pergunta QUAIS tarefas o usuário quer paralelizar (faixas com git worktrees + agentes paralelos nativos do Antigravity via --paralelizar, ou uma tarefa após a outra via --sequencial), avisa que a execução roda em background e, durante ela, posta no chat a cada 1 minuto a tabela de andamento (o que está rodando e o que não está) + resumo geral — com resumo completo ao final. Integração com Artifacts (task.md, implementation_plan.md, walkthrough.md) e Slash Commands (/goal, /grill-me, /schedule, /learn). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas".
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.3.0
+  version: 3.5.0
   agent: antigravity
 ---
 
@@ -95,7 +95,8 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 ```
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
-`plano <feature> [--agents antigravity]` · `painel <feature> [--porta N] [--sem-abrir]` ·
+`plano <feature> [--agents antigravity] [--paralelizar T-xxx,T-yyy] [--sequencial]` ·
+`resumo [feature] [--tabela] [--gravar --origem ia --texto "..."]` ·
 `tarefa <feature> <T-xxx> <status>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
 `audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
@@ -178,34 +179,59 @@ listas no plano.
   Campos opcionais por tarefa: `Modelo:` e `Esforço:` (baixo|medio|alto|xalto|max).
 - **Visualização depois:** espelhe as tarefas no Artifact de lista de tarefas
   do Antigravity para o acompanhamento `[ ]`/`[/]`/`[x]`.
-- **Fechou o tasks.md? Anuncie o paralelismo.** Rode `onp-spec plano <feature>`
-  e conte ao usuário, sem ele pedir: *"X destas Y tarefas podem rodar EM
-  PARALELO, em N faixas — quer que eu monte a execução? Dá para acompanhar
-  ao vivo no navegador."* Nunca deixe o paralelismo como segredo do motor.
+- **Fechou o tasks.md? Anuncie o paralelismo e PERGUNTE QUAIS.** Rode
+  `onp-spec plano <feature>` e apresente ao usuário, sem ele pedir, o plano
+  como RECOMENDAÇÃO: *"X destas Y tarefas podem rodar EM PARALELO, em N
+  faixas — recomendo assim."* Em seguida pergunte (no chat ou via
+  `implementation_plan.md` com `request_feedback = true`): **quais tarefas
+  ele quer paralelizar?** — todas (a recomendação), um subconjunto, ou
+  nenhuma (uma após a outra). A escolha é dele — nunca execute sem essa
+  resposta, e nunca deixe o paralelismo como segredo do motor.
 
 ### 4. Plano de execução (2+ tarefas pendentes)
 
+- **QUAIS tarefas paralelizar é escolha do USUÁRIO — pergunte antes de
+  executar** (no `implementation_plan.md` com `request_feedback = true`, ou
+  direto no chat; se ainda não perguntou na fase Tarefas, pergunte agora).
+  Escolheu todas → use o plano como está. Escolheu um subconjunto →
+  regenere com `onp-spec plano <feature> --paralelizar T-xxx,T-yyy` e siga
+  esse. Escolheu nenhuma → regenere com `--sequencial`. Sem resposta, não
+  execute.
 - `onp-spec plano <feature>` (se a detecção errar, force com
   `--agents antigravity`). O motor agrupa tarefas de **arquivos disjuntos**
   em **faixas paralelas** — 1 faixa = 1 git worktree + 1 branch + 1 janela de
   contexto limpa — e grava `.spec/features/<feature>/plano-execucao.md` com:
   os comandos de worktree, **um prompt pronto por faixa**, a ordem de merge,
-  a gestão de commits e o gate final.
-- Espelhe o resumo (faixas, ondas, branches) no `implementation_plan.md` com
-  `request_feedback = true` — o usuário aprova ANTES de executar.
+  a gestão de commits e o gate final. Com `--paralelizar`: só as tarefas
+  ESCOLHIDAS entram nas faixas (as demais rodam uma após a outra, ao final).
+  Com `--sequencial`: um prompt por tarefa, na ordem, para executar na
+  árvore principal — sem worktrees.
+- Espelhe o resumo (faixas ou ordem, branches) no `implementation_plan.md`
+  com `request_feedback = true` — o usuário aprova ANTES de executar.
 - **Execução paralela usa os agentes nativos do Antigravity**: um agente NOVO
   por faixa (janela limpa), cada um no seu worktree, com o prompt do plano.
-  Esta skill NUNCA depende do CLI do Claude — isso é da skill irmã do Claude
-  Code.
-- **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
-  em background (terminal) e entregue a URL — um painel local no navegador com
-  a árvore projeto → execução → faixa → tarefa refletindo em tempo real o
-  tasks.md, as provas do verify e o gate enquanto os agentes das faixas
-  trabalham. `onp-spec painel` sem feature mostra TODOS os projetos de uma vez
-  (ledger único em `~/.onp-spec/painel/ledger.jsonl`). No Antigravity o painel
-  é modo acompanhamento: quem executa são os agentes nativos, não um botão.
-- **Marque o progresso no ledger** para o painel refletir o que seus agentes
-  fazem: `onp-spec tarefa <feature> <T-xxx> concluida` ao terminar cada uma.
+  No modo sequencial, você mesmo executa os prompts na ordem. Esta skill
+  NUNCA depende do CLI do Claude — isso é da skill irmã do Claude Code.
+- **Antes de executar, AVISE — sempre**: diga ao usuário, em uma frase, que
+  as alterações vão rodar em **background** (os agentes trabalham nas
+  janelas deles), que a cada 1 minuto você posta no chat a **tabela de
+  andamento**, e que ao final ele recebe o **resumo completo** da execução.
+  Só então despache os agentes.
+- **Tabela + resumo a cada 1 minuto (obrigatórios enquanto executa)**: poste
+  no chat a **tabela de andamento** (`onp-spec resumo <feature> --tabela` —
+  uma linha por tarefa: qual está rodando, qual não está, o que
+  concluiu/falhou) e um parágrafo curto (2 a 4 frases, português simples) do
+  que está acontecendo, registrando-o no ledger:
+  `onp-spec resumo <feature> --gravar --origem ia --texto "..."`. Sem tempo
+  de escrever? `onp-spec resumo <feature> --gravar` registra o resumo do
+  motor. O usuário nunca fica sem saber o que está rolando.
+- **Marque o progresso no ledger** (é disso que a tabela e o resumo são
+  feitos): ao iniciar/terminar cada tarefa, rode o comando `evento` que o
+  plano-execucao.md traz pronto (estado `executando`/`concluida`/`falhou`) e,
+  ao terminar, `onp-spec tarefa <feature> <T-xxx> concluida`.
+- **Terminou? Entregue o resumo completo**: a tabela final, o que cada
+  tarefa fez (commits), o que falhou (se algo falhou) e a saída do gate
+  (verify + audit) colada e traduzida em uma frase.
 - Feature pequena ou usuário quer simples? Execute as faixas você mesmo, em
   sequência — o plano continua valendo como roteiro de branches e commits.
 
@@ -287,9 +313,12 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
 - **"Que código não atende requisito nenhum?"** → código órfão
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
-- **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
-- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>` (ou
-  `onp-spec painel` para todos os projetos de uma vez).
+- **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>` — e
+  QUAIS tarefas paralelizar é escolha do usuário, via pergunta.
+- **"O que está rolando agora?"** → `onp-spec resumo <feature> --tabela` (a
+  tabela de andamento) + `onp-spec resumo <feature>` (o texto) — e é você
+  quem grava o resumo a cada ~1 min (`--gravar --origem ia --texto "..."`)
+  e posta tabela e texto no chat.
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

@@ -9,6 +9,7 @@ import {
   renderPlanoMd,
   renderPlanoSh,
   renderPlanoHtml,
+  renderPlanoJson,
 } from '../src/core/plano.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 
@@ -138,14 +139,159 @@ function planPadrao(agent) {
   );
 }
 
-test('md (claude): faixas, gestão de branches, script e botão citados', () => {
+test('md (claude): faixas, gestão de branches, resumo por minuto, sem botão', () => {
   const md = renderPlanoMd(planPadrao('claude'));
   assert.match(md, /## Faixas e ondas/);
   assert.match(md, /spec\/pagamentos-faixa-1/);
   assert.match(md, /1 tarefa = 1 commit/);
   assert.match(md, /executar-tarefas\.sh/);
-  assert.match(md, /Executar todas as tarefas em janelas limpas e paralelas/);
+  // a escolha (quais paralelizar, ou uma após a outra) é do usuário
+  assert.match(md, /onp-spec plano pagamentos --paralelizar T-xxx,T-yyy/);
+  assert.match(md, /--sequencial/);
+  // acompanhamento é resumo no chat/terminal — não existe mais painel/botão
+  assert.match(md, /resumo geral de andamento/i);
+  assert.match(md, /onp-spec resumo pagamentos/);
+  assert.doesNotMatch(md, /painel/);
+  assert.doesNotMatch(md, /Executar todas as tarefas em janelas limpas/);
   assert.match(md, /audit --ci/);
+});
+
+test('--paralelizar: só as escolhidas entram nas faixas; as demais viram sequenciais com motivo', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [
+        t('T-001', { files: ['src/a.js'], line: 1 }),
+        t('T-002', { files: ['src/b.js'], line: 5 }),
+        t('T-003', { files: ['src/c.js'], line: 9 }),
+        t('T-004', { line: 13 }),
+      ],
+    }),
+    'pagamentos',
+    { agent: 'claude', paralelizar: ['T-001', 'T-003'], enginePath: '/tmp/repo-x/bin/onp-spec.js' }
+  );
+  assert.ok(!plan.erro, plan.erro);
+  assert.equal(plan.modo, 'paralelo');
+  assert.deepEqual(plan.faixas.map((fx) => fx.tasks.map((x) => x.id)), [['T-001'], ['T-003']]);
+  assert.deepEqual(plan.sequenciais.map((x) => x.id), ['T-002', 'T-004'], 'fora da seleção roda ao final, na ordem');
+  assert.match(plan.sequenciais[0].motivoSeq, /fora da seleção/);
+  assert.match(plan.sequenciais[1].motivoSeq, /pegada desconhecida/);
+  // ficar fora da seleção é decisão do usuário, não fallback — sem aviso
+  assert.ok(!plan.avisos.some((a) => a.includes('T-002')));
+  assert.deepEqual(plan.paralelizar, ['T-001', 'T-003']);
+});
+
+test('--paralelizar: escolhidas que compartilham arquivo caem na MESMA faixa', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [
+        t('T-001', { files: ['src/a.js'], line: 1 }),
+        t('T-002', { files: ['src/a.js', 'src/c.js'], line: 5 }),
+        t('T-003', { files: ['src/b.js'], line: 9 }),
+      ],
+    }),
+    'pagamentos',
+    { paralelizar: ['T-001', 'T-002'] }
+  );
+  assert.equal(plan.faixas.length, 1, 'conflito de arquivo não vira paralelismo nem com seleção');
+  assert.deepEqual(plan.faixas[0].tasks.map((x) => x.id), ['T-001', 'T-002']);
+  assert.deepEqual(plan.sequenciais.map((x) => x.id), ['T-003']);
+});
+
+test('--paralelizar: tarefa desconhecida ou seleção vazia é erro amigável', () => {
+  const proj = () => projeto({ tasks: [t('T-001', { files: ['a'] }), t('T-002', { files: ['b'], status: 'concluida' })] });
+  assert.match(
+    montarPlano(proj(), 'pagamentos', { paralelizar: ['T-999'] }).erro,
+    /T-999/,
+    'id inexistente aparece no erro'
+  );
+  assert.match(
+    montarPlano(proj(), 'pagamentos', { paralelizar: ['T-002'] }).erro,
+    /não estão pendentes/,
+    'tarefa concluída não é paralelizável'
+  );
+  assert.match(montarPlano(proj(), 'pagamentos', { paralelizar: [] }).erro, /--sequencial/);
+});
+
+test('--paralelizar aparece nos artefatos: md (seleção + regenere), json e sh', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [t('T-001', { files: ['src/a.js'], line: 1 }), t('T-002', { files: ['src/b.js'], line: 5 })],
+    }),
+    'pagamentos',
+    { agent: 'claude', paralelizar: ['T-001'], enginePath: '/tmp/repo-x/bin/onp-spec.js' }
+  );
+  const md = renderPlanoMd(plan);
+  assert.match(md, /seleção do usuário.*T-001/);
+  assert.match(md, /Regenere: `onp-spec plano pagamentos --paralelizar T-001`/);
+  assert.match(md, /fora da seleção do usuário/);
+  const dados = JSON.parse(renderPlanoJson(plan));
+  assert.deepEqual(dados.paralelizar, ['T-001']);
+  const sh = renderPlanoSh(plan);
+  assert.match(sh, /sequencial T-002 \(fora da seleção do usuário\)/);
+});
+
+test('montarPlano --sequencial: sem faixas, tudo uma após a outra na ordem do tasks.md', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [
+        t('T-002', { files: ['src/b.js'], line: 5 }),
+        t('T-001', { files: ['src/a.js'], line: 1 }),
+        t('T-003', { line: 9 }),
+      ],
+    }),
+    'pagamentos',
+    { agent: 'claude', sequencial: true, enginePath: '/tmp/repo-x/bin/onp-spec.js' }
+  );
+  assert.equal(plan.modo, 'sequencial');
+  assert.equal(plan.faixas.length, 0);
+  assert.equal(plan.ondas.length, 0);
+  assert.deepEqual(plan.sequenciais.map((x) => x.id), ['T-001', 'T-002', 'T-003'], 'ordem do tasks.md');
+  // sem aviso de "pegada desconhecida": sequencial é escolha, não fallback
+  assert.ok(!plan.avisos.some((a) => a.includes('pegada desconhecida')));
+});
+
+test('md/sh/html no modo sequencial: sem worktrees, ordem explícita, mesmo gate', () => {
+  const proj = projeto({
+    tasks: [t('T-001', { files: ['src/a.js'], line: 1 }), t('T-002', { files: ['src/b.js'], line: 5 })],
+  });
+  const plan = montarPlano(proj, 'pagamentos', { agent: 'claude', sequencial: true, enginePath: '/tmp/repo-x/bin/onp-spec.js' });
+
+  const md = renderPlanoMd(plan);
+  assert.match(md, /modo SEQUENCIAL \(escolha do usuário\)/);
+  assert.match(md, /## Ordem de execução \(uma tarefa após a outra\)/);
+  assert.doesNotMatch(md, /## Faixas e ondas/);
+  assert.match(md, /sem worktrees e sem paralelismo/);
+  assert.doesNotMatch(md, /git worktree|1 faixa = 1 worktree/);
+  assert.match(md, /audit --ci/);
+
+  const sh = renderPlanoSh(plan);
+  assert.match(sh, /executar_seq_T_001/);
+  assert.match(sh, /executar_seq_T_002/);
+  assert.doesNotMatch(sh, /executar_faixa_/);
+  assert.match(sh, /rodar_gate/);
+
+  const html = renderPlanoHtml(plan);
+  assert.match(html, /modo <b>sequencial<\/b> \(escolha do usuário\)/);
+  assert.match(html, /Ordem de execução/);
+
+  const dados = JSON.parse(renderPlanoJson(plan));
+  assert.equal(dados.modo, 'sequencial');
+  assert.deepEqual(dados.faixas, []);
+  assert.equal(dados.sequenciais.length, 2);
+});
+
+test('md (antigravity, sequencial): prompts na ordem, sem worktrees, resumo do agente', () => {
+  const proj = projeto({
+    tasks: [t('T-001', { files: ['src/a.js'], line: 1 }), t('T-002', { files: ['src/b.js'], line: 5 })],
+  });
+  const plan = montarPlano(proj, 'pagamentos', { agent: 'antigravity', sequencial: true, enginePath: '/tmp/repo-x/bin/onp-spec.js' });
+  const md = renderPlanoMd(plan);
+  assert.match(md, /Sequencial no Antigravity/);
+  assert.match(md, /Prompt — T-001/);
+  assert.match(md, /Prompt — T-002/);
+  assert.doesNotMatch(md, /git worktree add/);
+  assert.match(md, /resumo pagamentos --gravar --origem ia --texto/);
+  assert.doesNotMatch(md, /claude -p/);
 });
 
 test('md (antigravity): worktrees, prompt por faixa, sem claude CLI', () => {
@@ -191,8 +337,8 @@ test('sh: dispatcher permite reexecutar UMA faixa, UMA sequencial, ou só o gate
   assert.match(sh, /--gate\) MODO="gate"/);
   assert.match(sh, /--listar\) MODO="listar"/);
   assert.match(sh, /--sem-gate\) COM_GATE=0/);
-  // despacho por alvo, com faixa desconhecida barrada
-  assert.match(sh, /faixa-1\) evento --tipo inicio --escopo "faixa:faixa-1"; executar_faixa_1/);
+  // despacho por alvo (com o resumo periódico ligado), faixa desconhecida barrada
+  assert.match(sh, /faixa-1\) evento --tipo inicio --escopo "faixa:faixa-1"; iniciar_resumos; executar_faixa_1/);
   assert.match(sh, /falhar "faixa desconhecida/);
   assert.match(sh, /falhar "tarefa sequencial desconhecida/);
   // worktree de tentativa anterior é limpo antes de recriar
@@ -201,6 +347,22 @@ test('sh: dispatcher permite reexecutar UMA faixa, UMA sequencial, ou só o gate
   assert.match(sh, /tentativa\(\)/);
   // a dica de reexecução aparece quando algo falha
   assert.match(sh, /reexecute só ela: bash .*--faixa \$1/);
+});
+
+test('sh: resumo geral de andamento a cada minuto (IA com fallback do motor)', () => {
+  const sh = renderPlanoSh(planPadrao('claude'));
+  assert.match(sh, /gerar_resumo\(\)/);
+  assert.match(sh, /sleep 60; gerar_resumo/);
+  assert.match(sh, /resumo "\$FEATURE" --contexto/);
+  assert.match(sh, /--gravar --origem ia --texto "\$ia"/);
+  assert.match(sh, /RESUMO_MODEL='claude-haiku-4-5'/);
+  // sem IA disponível, o resumo do motor entra no lugar (nunca silêncio)
+  assert.match(sh, /resumo "\$FEATURE" --gravar >\/dev\/null/);
+  // o texto aparece no terminal, para quem acompanha por lá
+  assert.match(sh, /📣 resumo/);
+  // ao sair: mata o loop E o sleep filho (pipe não fica preso) e grava o final
+  assert.match(sh, /pkill -P "\$RESUMO_PID"/);
+  assert.match(sh, /trap 'parar_resumos; node "\$ENGINE" resumo "\$FEATURE" --gravar/);
 });
 
 test('sh: --sem-gate NUNCA anuncia alinhamento (não existe prova sem audit)', () => {
@@ -225,17 +387,20 @@ test('plano.json: estrutura de máquina para o painel e outras ferramentas', asy
   assert.match(dados.logsDir, /onp-worktrees\/repo-x-pagamentos-logs/);
 });
 
-test('html: botão, comando, tema e escape de conteúdo hostil', () => {
+test('html: visual sem botão, comando visível, tema e escape de conteúdo hostil', () => {
   const proj = projeto({
     tasks: [t('T-001', { files: ['src/a.js'] })],
   });
   proj.features[0].tasks.tasks[0].title = 'Tarefa <script>alert(1)</script> & "aspas"';
   const plan = montarPlano(proj, 'pagamentos', { agent: 'claude' });
   const html = renderPlanoHtml(plan);
-  assert.match(html, /Executar todas as tarefas em janelas limpas e paralelas/);
+  // execução é via agente: o html não tem botão nem clipboard
+  assert.doesNotMatch(html, /<button/);
+  assert.doesNotMatch(html, /navigator\.clipboard/);
+  assert.match(html, /via agente/);
   assert.match(html, /bash \.spec\/features\/pagamentos\/executar-tarefas\.sh/);
+  assert.match(html, /resumo geral de andamento/i);
   assert.match(html, /prefers-color-scheme: dark/);
-  assert.match(html, /navigator\.clipboard/);
   assert.ok(!html.includes('<script>alert(1)</script>'), 'título precisa sair escapado');
   assert.match(html, /&lt;script&gt;/);
 });

@@ -1,6 +1,6 @@
 // E2E dos pontos multi-agente: init --agents (claude | antigravity | inválido),
 // plano gerando os artefatos certos por agente (sh com sintaxe bash válida,
-// html com o botão) e o comando tarefa.
+// html somente leitura, modo sequencial) e o comando tarefa.
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -117,7 +117,7 @@ const TASKS = `# Tasks: Pagamentos
 - Arquivos: src/models/cobranca.js, src/routes/cobranca.js
 `;
 
-test('plano (claude): gera md + sh executável com bash válido + html com botão', () => {
+test('plano (claude): gera md + sh executável com bash válido + html somente leitura', () => {
   cli('new', 'pagamentos');
   const dir = path.join(root, '.spec', 'features', 'pagamentos');
   writeFileSync(path.join(dir, 'spec.md'), SPEC);
@@ -127,7 +127,11 @@ test('plano (claude): gera md + sh executável com bash válido + html com botã
   assert.equal(code, 0, out);
   assert.match(out, /PODEM RODAR EM PARALELO em 2 faixa\(s\)/);
   assert.match(out, /onde está cada coisa/);
-  assert.match(out, /onp-spec painel pagamentos/);
+  // a escolha é do usuário: a saída ensina a rota sequencial
+  assert.match(out, /--sequencial/);
+  // acompanhamento é o resumo — servidor/painel não existe mais
+  assert.match(out, /resumo geral de andamento/i);
+  assert.doesNotMatch(out, /painel/);
 
   const md = readFileSync(path.join(dir, 'plano-execucao.md'), 'utf-8');
   assert.match(md, /faixa-1/);
@@ -154,11 +158,41 @@ test('plano (claude): gera md + sh executável com bash válido + html com botã
   assert.match(listar.stdout, /reexecutar uma faixa/);
 
   const html = readFileSync(path.join(dir, 'plano-execucao.html'), 'utf-8');
-  assert.match(html, /Executar todas as tarefas em janelas limpas e paralelas/);
+  assert.doesNotMatch(html, /<button/, 'execução é via agente — html sem botão');
+  assert.match(html, /via agente/);
 
   const planoJson = JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8'));
   assert.equal(planoJson.agent, 'claude');
+  assert.equal(planoJson.modo, 'paralelo');
   assert.equal(planoJson.faixas.length, 2);
+});
+
+test('plano --sequencial (claude): uma tarefa após a outra, sh válido, sem faixas', () => {
+  const dir = path.join(root, '.spec', 'features', 'pagamentos');
+  const { code, out } = cli('plano', 'pagamentos', '--agents', 'claude', '--sequencial');
+  assert.equal(code, 0, out);
+  assert.match(out, /SEQUENCIAL — escolha do usuário/);
+  assert.match(out, /uma após a outra/);
+
+  const planoJson = JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8'));
+  assert.equal(planoJson.modo, 'sequencial');
+  assert.deepEqual(planoJson.faixas, []);
+  assert.deepEqual(planoJson.sequenciais.map((t) => t.id), ['T-001', 'T-002', 'T-003']);
+
+  const shPath = path.join(dir, 'executar-tarefas.sh');
+  const bashN = spawnSync('bash', ['-n', shPath], { encoding: 'utf-8' });
+  assert.equal(bashN.status, 0, `bash -n falhou: ${bashN.stderr}`);
+  const listar = spawnSync('bash', [shPath, '--listar'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(listar.status, 0, listar.stderr);
+  assert.match(listar.stdout, /seq\s+T-001/);
+  assert.doesNotMatch(listar.stdout, /faixa-1/);
+
+  // volta o plano paralelo para os testes seguintes
+  assert.equal(cli('plano', 'pagamentos', '--agents', 'claude').code, 0);
 });
 
 test('plano (antigravity): md com prompts por faixa, sem sh/html novos e sem claude -p', () => {
@@ -188,15 +222,14 @@ test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {
   assert.equal(cli('tarefa', 'pagamentos', 'T-001', 'meio-feita').code, 2);
 });
 
-test('upgrade: plano de versão anterior (sem runId) é registrado no painel em vez de sumir', () => {
+test('upgrade: plano de versão anterior (sem runId) é registrado no ledger em vez de sumir', () => {
   const planoPath = path.join(root, '.spec', 'features', 'pagamentos', 'plano.json');
   // simula o artefato de uma versão que não tinha ledger
   const antigo = JSON.parse(readFileSync(planoPath, 'utf-8'));
   delete antigo.runId;
   writeFileSync(planoPath, JSON.stringify(antigo, null, 2));
 
-  // `painel` precisa perceber e regenerar; usamos o próprio plano para provar
-  // que a regeneração acontece (o comando painel bloqueia servindo HTTP)
+  // regenerar o plano registra a execução no ledger global (fonte do resumo)
   const r = cli('plano', 'pagamentos');
   assert.equal(r.code, 0, r.out);
   const novo = JSON.parse(readFileSync(planoPath, 'utf-8'));

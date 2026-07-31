@@ -4,8 +4,15 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, chmodSync }
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml, renderPlanoJson } from './core/plano.js';
-import { servirPainel } from './core/painel.js';
-import { registrarEvento, podarLedger, lerStream, lerEventos } from './core/ledger.js';
+import { registrarEvento, podarLedger, lerStream, lerEventos, montarArvore } from './core/ledger.js';
+import {
+  resumoDeterministico,
+  contextoParaIa,
+  montarResumoAtual,
+  registrarResumo,
+  execucaoAlvo,
+  tabelaAndamento,
+} from './core/resumo.js';
 import { TASK_STATUSES } from './parsers/tasks.js';
 import { DASH, foldStatus } from './util/text.js';
 import { loadConfig, DEFAULT_CONFIG } from './config.js';
@@ -70,24 +77,33 @@ comandos:
                       cria .spec/, constituição e config no diretório atual
                       (--agents também instala a skill do agente escolhido)
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
-  plano <feature> [--agents claude|antigravity]
-                      plano de execução: agrupa tarefas em faixas PARALELAS
-                      (arquivos disjuntos → 1 worktree + 1 branch + 1 janela
-                      limpa por faixa) e gera os artefatos de execução
-                      · sempre: plano-execucao.md (faixas, branches, commits)
+  plano <feature> [--agents claude|antigravity] [--paralelizar T-xxx,T-yyy]
+                  [--sequencial]
+                      plano de execução. Default: agrupa tarefas em faixas
+                      PARALELAS (arquivos disjuntos → 1 worktree + 1 branch +
+                      1 janela limpa por faixa). Com --paralelizar: só as
+                      tarefas ESCOLHIDAS entram nas faixas (o resto roda uma
+                      após a outra, ao final). Com --sequencial: tudo uma
+                      tarefa após a outra, na árvore principal. QUAIS tarefas
+                      paralelizar é escolha do USUÁRIO (o agente pergunta
+                      antes de executar).
+                      · sempre: plano-execucao.md (faixas/ordem, branches,
+                        commits) + plano.json
                       · claude: executar-tarefas.sh (claude -p headless com
-                        --model/--effort por tarefa) + plano-execucao.html
-                        (visual, botão "Executar todas as tarefas...")
-                      · antigravity: prompts prontos por faixa p/ os agentes
-                        paralelos nativos (não depende do CLI do Claude)
-  painel [feature] [--porta N] [--sem-abrir]
-                      painel AO VIVO no navegador (servidor local, zero deps,
-                      só 127.0.0.1). SEM feature: mostra TODOS os projetos e
-                      execuções do ledger global. Em tempo real: árvore
-                      projeto → execução → faixa → tarefa, o STREAM do modelo
-                      (ferramenta chamada, raciocínio, saída, custo), o gate,
-                      e botões para executar tudo, REEXECUTAR só a faixa que
-                      falhou, ou rodar só o gate.
+                        --model/--effort por tarefa e resumo de andamento a
+                        cada 1 min no terminal) + plano-execucao.html (visual)
+                      · antigravity: prompts prontos p/ os agentes nativos
+                        (não depende do CLI do Claude)
+  resumo [feature] [--tabela] [--global] [--run <runId>]
+         [--gravar [--texto "..."] [--origem ia|motor]]
+                      o RESUMO GERAL DE ANDAMENTO em texto: o que está
+                      rodando agora, o que terminou, o que falhou. É o texto
+                      que o agente posta no chat a cada ~1 min enquanto houver
+                      execução. --tabela imprime a TABELA de andamento em
+                      markdown (uma linha por tarefa: onde roda, status e
+                      última ação) — pronta para colar no chat junto com o
+                      texto. --gravar registra no ledger (com --texto, é a
+                      IA/agente escrevendo; sem, vale o do motor).
   tarefa <feature> <T-xxx> <status>
                       atualiza o status da tarefa no tasks.md
                       (pendente | em-andamento | concluida)
@@ -99,7 +115,7 @@ comandos:
   scaffold <feature> [--force]
                       gera esqueleto de teste (que falha) para cada critério
                       de aceite ainda sem teste
-  status              painel: features, critérios provados, suposições e
+  status              visão geral: features, critérios provados, suposições e
                       perguntas abertas
   assumptions         lista todas as suposições e perguntas com status
   licoes <add|list|sugerir|penalizar|status>
@@ -287,8 +303,8 @@ function detectarAgente(rootDir, flag) {
   return { agent: 'claude' };
 }
 
-function gerarArtefatosPlano(project, featureName, agent) {
-  const plan = montarPlano(project, featureName, { agent, enginePath: process.argv[1] });
+function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, paralelizar } = {}) {
+  const plan = montarPlano(project, featureName, { agent, sequencial, paralelizar, enginePath: process.argv[1] });
   if (plan.erro) return plan;
   const dir = path.join(project.config.rootDir, plan.baseDir);
   writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
@@ -302,8 +318,8 @@ function gerarArtefatosPlano(project, featureName, agent) {
     writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
     gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
   }
-  // registra a execução no ledger GLOBAL: é assim que o painel enxerga este
-  // projeto junto com os outros, mesmo antes de qualquer execução
+  // registra a execução no ledger GLOBAL: é assim que o `onp-spec resumo`
+  // enxerga este projeto junto com os outros, mesmo antes de qualquer execução
   registrarEvento({
     tipo: 'plano',
     runId: plan.runId,
@@ -342,7 +358,7 @@ function cmdEvento(flags) {
 }
 
 // `onp-spec stream-resumo <runId> <chave>` — uma linha legível no terminal a
-// partir do stream NDJSON (o painel mostra a versão completa)
+// partir do stream NDJSON (o stream completo fica no ledger para diagnóstico)
 function cmdStreamResumo(positional) {
   const [runId, chave] = positional;
   if (!runId || !chave) {
@@ -374,7 +390,7 @@ function cmdStreamResumo(positional) {
 function cmdPlano(project, positional, flags) {
   const featureName = positional[0];
   if (!featureName) {
-    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity]');
+    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity] [--paralelizar T-xxx,T-yyy] [--sequencial]');
     return 2;
   }
   const det = detectarAgente(project.config.rootDir, flags.agents);
@@ -382,28 +398,60 @@ function cmdPlano(project, positional, flags) {
     console.error(det.erro);
     return 2;
   }
-  const plan = gerarArtefatosPlano(project, featureName, det.agent);
+  if (flags.sequencial && flags.paralelizar) {
+    console.error('erro: use --paralelizar OU --sequencial — os dois juntos não fazem sentido');
+    return 2;
+  }
+  const paralelizar =
+    flags.paralelizar === undefined
+      ? undefined
+      : flags.paralelizar === true
+        ? []
+        : String(flags.paralelizar)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+  const plan = gerarArtefatosPlano(project, featureName, det.agent, {
+    sequencial: Boolean(flags.sequencial),
+    paralelizar,
+  });
   if (plan.erro) {
     console.error(`erro: ${plan.erro}`);
     return 2;
   }
 
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
-  console.log(
-    `✔ plano de execução (${det.agent}): ${paralelas + plan.sequenciais.length} tarefa(s) — ` +
-      `${paralelas} PODEM RODAR EM PARALELO em ${plan.faixas.length} faixa(s) · ${plan.sequenciais.length} sequencial(is) · ${plan.ondas.length} onda(s)`
-  );
+  if (plan.modo === 'sequencial') {
+    console.log(
+      `✔ plano de execução (${det.agent}, SEQUENCIAL — escolha do usuário): ` +
+        `${plan.sequenciais.length} tarefa(s), uma após a outra, na árvore principal`
+    );
+  } else {
+    console.log(
+      `✔ plano de execução (${det.agent}): ${paralelas + plan.sequenciais.length} tarefa(s) — ` +
+        `${paralelas} PODEM RODAR EM PARALELO em ${plan.faixas.length} faixa(s) · ${plan.sequenciais.length} sequencial(is) · ${plan.ondas.length} onda(s)`
+    );
+    if (plan.paralelizar) {
+      console.log(`  (seleção do usuário: ${plan.paralelizar.join(', ')} em paralelo; as demais rodam uma após a outra ao final)`);
+    } else {
+      console.log(
+        '  (o usuário quer escolher? regenere com: onp-spec plano ' +
+          featureName +
+          ' --paralelizar T-xxx,T-yyy — ou --sequencial para uma após a outra)'
+      );
+    }
+  }
   console.log('\nonde está cada coisa:');
   console.log(`  · plano (leia primeiro): ${plan.gerados[0]}`);
   if (plan.agent === 'claude') {
     console.log(`  · executor headless:     ${plan.baseDir}/executar-tarefas.sh`);
-    console.log(`  · visual com botão:      ${plan.baseDir}/plano-execucao.html`);
+    console.log(`  · visual (leitura):      ${plan.baseDir}/plano-execucao.html`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
-  console.log('\npróximo passo (escolha um):');
-  console.log(`  · acompanhar AO VIVO e executar com um clique: onp-spec painel ${featureName}`);
+  console.log('\npróximo passo:');
   if (plan.agent === 'claude') {
-    console.log(`  · direto no terminal: bash ${plan.baseDir}/executar-tarefas.sh`);
+    console.log(`  · executar: bash ${plan.baseDir}/executar-tarefas.sh`);
+    console.log('    (enquanto roda, o resumo geral de andamento sai a cada 1 min — repasse ao usuário)');
   } else {
     console.log(`  · abra um agente novo (janela limpa) por faixa e cole o prompt correspondente`);
     console.log(`    do plano-execucao.md — depois merge + verify + audit, como descrito lá`);
@@ -411,72 +459,47 @@ function cmdPlano(project, positional, flags) {
   return 0;
 }
 
-// Painel GLOBAL (sem feature): mostra todos os projetos do ledger. Não precisa
-// de .spec/ nem de plano — serve para acompanhar tudo que está rodando.
-async function cmdPainelGlobal(config, flags) {
-  console.log('· painel global: todas as execuções de todos os projetos no ledger');
-  await servirPainel({
-    rootDir: config.rootDir,
-    specDir: config.specDir,
-    global: true,
-    porta: parseInt(flags.porta, 10) || 4747,
-    abrir: !flags['sem-abrir'],
-  });
-  return new Promise(() => {});
-}
+// `onp-spec resumo` — o RESUMO GERAL DE ANDAMENTO. É o texto que o agente
+// posta no chat a cada ~1 minuto enquanto houver execução. Sem flags, imprime
+// (IA fresca do ledger > motor determinístico); com --gravar, registra no
+// ledger (--texto = escrito pela IA/agente do executor).
+function cmdResumo(config, positional, flags) {
+  const feature = positional[0] || null;
+  const filtro = flags.global ? {} : { projetoDir: config.rootDir, feature };
+  const projetos = montarArvore(lerEventos(), filtro);
 
-async function cmdPainel(project, positional, flags) {
-  const featureName = positional[0];
-  const det = detectarAgente(project.config.rootDir, flags.agents);
-  if (det.erro) {
-    console.error(det.erro);
-    return 2;
+  if (flags.contexto) {
+    console.log(contextoParaIa(projetos));
+    return 0;
   }
-  const planoPath = path.join(
-    project.config.rootDir,
-    project.config.specDir,
-    'features',
-    featureName,
-    'plano.json'
-  );
 
-  // O painel só enxerga o que está no ledger. Um plano pode existir em disco e
-  // estar FORA dele: nunca foi gerado (primeira vez) ou veio de uma versão
-  // anterior, que não tinha ledger. Nos dois casos, registrar agora — senão o
-  // painel abriria vazio sem explicar por quê.
-  let motivo = null;
-  if (!existsSync(planoPath)) {
-    motivo = 'plano ainda não existia';
-  } else {
-    let runId = null;
-    try {
-      runId = JSON.parse(readFileSync(planoPath, 'utf-8')).runId || null;
-    } catch {
-      motivo = 'plano.json ilegível';
-    }
-    if (!motivo && !runId) motivo = 'plano gerado por uma versão anterior (sem identificador de execução)';
-    if (!motivo && !lerEventos().some((e) => e.tipo === 'plano' && e.runId === runId)) {
-      motivo = 'plano ainda não estava no painel';
-    }
+  // a TABELA de andamento (markdown) — o agente cola no chat a cada ~1 min
+  if (flags.tabela) {
+    console.log(tabelaAndamento(projetos));
+    return 0;
   }
-  if (motivo) {
-    const plan = gerarArtefatosPlano(project, featureName, det.agent);
-    if (plan.erro) {
-      console.error(`erro: ${plan.erro}`);
+
+  if (flags.gravar) {
+    const alvo = execucaoAlvo(projetos, { runId: typeof flags.run === 'string' ? flags.run : null });
+    if (!alvo) {
+      console.error('nenhuma execução no ledger para gravar o resumo — gere um plano primeiro (onp-spec plano <feature>)');
       return 2;
     }
-    console.log(`· ${motivo} — regenerado e registrado agora:`);
-    for (const g of plan.gerados) console.log(`    ${g}`);
+    const temTexto = typeof flags.texto === 'string' && flags.texto.trim();
+    const texto = temTexto ? flags.texto : resumoDeterministico(projetos);
+    const origem = temTexto ? (flags.origem === 'motor' ? 'motor' : 'ia') : 'motor';
+    const r = registrarResumo({ runId: alvo.runId, texto, origem });
+    if (r.erro) {
+      console.error(`erro: ${r.erro}`);
+      return 2;
+    }
+    console.log(`✔ resumo gravado (origem: ${r.origem}) para "${alvo.feature}"`);
+    console.log(r.texto);
+    return 0;
   }
-  await servirPainel({
-    rootDir: project.config.rootDir,
-    specDir: project.config.specDir,
-    feature: featureName,
-    porta: parseInt(flags.porta, 10) || 4747,
-    abrir: !flags['sem-abrir'],
-  });
-  // mantém o processo vivo até Ctrl+C — o servidor é a sessão
-  return new Promise(() => {});
+
+  console.log(montarResumoAtual(projetos).texto);
+  return 0;
 }
 
 function cmdTarefa(config, positional) {
@@ -752,13 +775,12 @@ export async function run(argv) {
   // comandos internos do executar-tarefas.sh (alimentam/leem o ledger global)
   if (command === 'evento') return cmdEvento(flags);
   if (command === 'stream-resumo') return cmdStreamResumo(positional);
-  // painel sem feature = visão global; não exige .spec/ nem plano
-  if (command === 'painel' && !positional[0]) return cmdPainelGlobal(config, flags);
+  // resumo geral de andamento: só precisa do ledger, não do projeto carregado
+  if (command === 'resumo') return cmdResumo(config, positional, flags);
 
   const project = loadProject(config);
 
   if (command === 'plano') return cmdPlano(project, positional, flags);
-  if (command === 'painel') return cmdPainel(project, positional, flags);
 
   if (command === 'audit') {
     const audit = auditProject(project, { ci: Boolean(flags.ci) });

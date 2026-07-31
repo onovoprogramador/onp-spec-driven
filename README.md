@@ -75,9 +75,9 @@ e cola a prova na conversa. Seu trabalho é conversar:
 
 > *"Especifica a feature de inscrição de alunos."*
 >
-> *"Boa. Divide em tarefas e gera o plano de execução paralela."*
+> *"Boa. Divide em tarefas e gera o plano de execução."*
 >
-> *"Executa o plano e abre o painel para eu acompanhar."*
+> *"Pode rodar em paralelo. Me atualiza a cada minuto."*
 >
 > *"A faixa 2 falhou — reexecuta só ela."*
 >
@@ -89,22 +89,24 @@ O que você recebe de volta, sempre em português simples:
   usuário e critérios de aceite escritos para gente (o detalhe técnico vai
   entre parênteses), mais as **suposições** e **perguntas em aberto** que o
   agente é obrigado a confessar.
-- **Plano de execução visual** — tarefas que não se tocam rodam **em
-  paralelo**, cada uma em sua janela limpa (git worktree + branch próprios).
-  O agente sempre te avisa: *"X dessas tarefas podem rodar em paralelo —
-  quer que eu execute?"* No Claude Code, o plano vem com o botão
-  **"Executar todas as tarefas em janelas limpas e paralelas"**; no
-  Antigravity, com um prompt pronto por faixa para os agentes paralelos.
-- **Acompanhamento ao vivo, sem comandos** — peça *"abre o painel"* e o agente
-  sobe um painel local no navegador (zero instalação) onde você vê, em tempo
-  real, **o que cada modelo está fazendo dentro de cada janela**: a ferramenta
-  que ele chamou e com quais argumentos, o raciocínio, a saída do comando, e o
-  fechamento com turnos, duração e custo. É um espelho da sessão headless.
-  Um painel serve **todos os seus projetos** ao mesmo tempo — dá para ver
-  qual projeto está rodando e quais tarefas dentro dele.
-- **Falhou uma faixa? refaça só ela** — um clique em *↻ reexecutar* (ou
-  `--faixa <id>` no terminal) repete apenas aquela faixa, do zero e numa
-  janela limpa, sem tocar no que já passou.
+- **Plano de execução com paralelismo opcional** — tarefas que não se tocam
+  PODEM rodar **em paralelo**, cada uma em sua janela limpa (git worktree +
+  branch próprios). Mas quem decide é você: o agente apresenta o plano como
+  **recomendação** (*"X dessas tarefas podem rodar em paralelo"*) e
+  **pergunta QUAIS você quer paralelizar** — todas, só algumas
+  (`onp-spec plano <feature> --paralelizar T-001,T-003`: as escolhidas em
+  paralelo, o resto uma após a outra ao final) ou nenhuma
+  (`--sequencial`: tudo na ordem, na árvore principal) — sempre com a mesma
+  disciplina de commits e o mesmo gate.
+- **Você sempre sabe o que está rolando** — antes de executar, o agente avisa
+  que as alterações vão rodar **em background**; enquanto rodam, a cada 1
+  minuto ele posta no chat a **tabela de andamento** (qual tarefa está
+  rodando, qual não está, o que concluiu/falhou — `onp-spec resumo <feature>
+  --tabela`) e o **resumo geral de andamento**: um parágrafo em português
+  (escrito por IA, com fallback do motor). Ao final, você recebe o resumo
+  completo da execução.
+- **Falhou uma faixa? refaça só ela** — `--faixa <id>` repete apenas aquela
+  faixa, do zero e numa janela limpa, sem tocar no que já passou.
 - **Gestão de commits e branches feita** — 1 tarefa = 1 commit rastreável,
   merges organizados, árvore limpa no final.
 - **A prova** — ao final, a auditoria mecânica: cada critério de aceite tem um
@@ -164,8 +166,6 @@ na própria skill: [skills/onp-spec-driven/SKILL.md](skills/onp-spec-driven/SKIL
 ## Requisitos
 
 Node.js ≥ 18. Sem outras dependências — nem para você, nem para o agente.
-(O repositório tem uma devDependency opcional, Playwright, só para os testes
-de interface do painel: `npm run test:ui`. O `npm test` continua zero-deps.)
 
 ## Licença
 

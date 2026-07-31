@@ -121,6 +121,18 @@ test('árvore: falha de faixa, conclusão e contagem de falhas', () => {
   assert.equal(ex.faixas[1].tarefas[0].estado, 'falhou');
 });
 
+test('evento resumo: fica só o mais recente; texto vazio é ignorado', () => {
+  registrarEvento(planoDe('run-rs'));
+  registrarEvento({ tipo: 'resumo', runId: 'run-rs', texto: 'primeiro', origem: 'motor' });
+  registrarEvento({ tipo: 'resumo', runId: 'run-rs', texto: 'segundo', origem: 'ia' });
+  registrarEvento({ tipo: 'resumo', runId: 'run-rs', texto: '   ', origem: 'ia' });
+
+  const ex = montarArvore(lerEventos())[0].execucoes[0];
+  assert.equal(ex.resumo.texto, 'segundo');
+  assert.equal(ex.resumo.origem, 'ia');
+  assert.ok(ex.resumo.ts);
+});
+
 test('reexecutar uma faixa: nova tentativa reabre as tarefas dela e só dela', () => {
   registrarEvento(planoDe('run-3'));
   // primeira rodada: faixa-1 ok, faixa-2 falhou

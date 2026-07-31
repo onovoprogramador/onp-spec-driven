@@ -1,10 +1,10 @@
 ---
 name: onp-spec-driven
-description: Desenvolvimento spec-anchored — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição de princípios verificáveis (preset LGPD/educação), lições aprendidas com lastro mecânico (o motor recusa lição sem sinal real de audit/verify; promoção por recorrência entre features) e plano de execução PARALELA (tarefas de arquivos disjuntos viram faixas em git worktrees, executadas por claude headless com modelo e esforço por tarefa — inclui script pronto e artefato visual com botão). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
+description: Desenvolvimento spec-anchored — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição de princípios verificáveis (preset LGPD/educação), lições aprendidas com lastro mecânico (o motor recusa lição sem sinal real de audit/verify; promoção por recorrência entre features) e plano de execução com PARALELISMO OPCIONAL: o agente apresenta o plano recomendado e SEMPRE pergunta QUAIS tarefas o usuário quer paralelizar (faixas com git worktrees + claude headless via --paralelizar, ou uma tarefa após a outra via --sequencial), avisa que a execução roda em background e, durante ela, posta no chat a cada 1 minuto a tabela de andamento (o que está rodando e o que não está) + resumo geral — com resumo completo ao final. Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente). Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas". NÃO use para technical design docs (use technical-design-doc-creator) nem análise de decomposição de arquitetura.
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.3.0
+  version: 3.5.0
   agent: claude
 ---
 
@@ -82,7 +82,8 @@ node <dir-desta-skill>/scripts/onp-spec.mjs <comando>
 ```
 
 Comandos: `init [--preset base|lgpd-educacao]` · `new <feature>` ·
-`plano <feature> [--agents claude]` · `painel <feature> [--porta N] [--sem-abrir]` ·
+`plano <feature> [--agents claude] [--paralelizar T-xxx,T-yyy] [--sequencial]` ·
+`resumo [feature] [--tabela] [--gravar --texto "..."]` ·
 `tarefa <feature> <T-xxx> <status>` ·
 `scaffold <feature> [--force]` · `verify <feature>` ·
 `audit [--ci] [--json] [--md <arquivo>]` · `status` · `assumptions` ·
@@ -165,43 +166,62 @@ produto).
   `Esforço:` (baixo|medio|alto|xalto|max) — o plano de execução usa os dois.
 - Status entre colchetes: `[pendente]`, `[em-andamento]`, `[concluida]`
   (acentos e maiúsculas são tolerados; token desconhecido é erro).
-- **Fechou o tasks.md? Anuncie o paralelismo.** Rode `onp-spec plano <feature>`
-  e conte ao usuário, sem ele pedir: *"X destas Y tarefas podem rodar EM
-  PARALELO, em N faixas — quer que eu execute? Dá para acompanhar tudo ao
-  vivo no navegador."* Nunca deixe o paralelismo como segredo do motor.
+- **Fechou o tasks.md? Anuncie o paralelismo e PERGUNTE QUAIS.** Rode
+  `onp-spec plano <feature>` e apresente ao usuário, sem ele pedir, o plano
+  como RECOMENDAÇÃO: *"X destas Y tarefas podem rodar EM PARALELO, em N
+  faixas — recomendo assim."* Em seguida pergunte (AskUserQuestion,
+  multiSelect): **quais tarefas ele quer paralelizar?** As opções são as
+  tarefas paralelizáveis — a recomendação (todas) marcada "(Recomendado)";
+  mais de 4? agrupe por faixa. Inclua a saída "nenhuma — uma após a outra".
+  A escolha é dele — nunca execute sem essa resposta, e nunca deixe o
+  paralelismo como segredo do motor.
 
 ### 4. Plano de execução (2+ tarefas pendentes)
 
+- **QUAIS tarefas paralelizar é escolha do USUÁRIO — pergunte antes de
+  executar** (a pergunta multiSelect da fase Tarefas; se ainda não
+  perguntou, pergunte agora). Escolheu todas → use o plano como está.
+  Escolheu um subconjunto → regenere com
+  `onp-spec plano <feature> --paralelizar T-xxx,T-yyy` e execute esse.
+  Escolheu nenhuma → regenere com `--sequencial`. Sem resposta, não execute.
 - `onp-spec plano <feature>` agrupa tarefas de **arquivos disjuntos** em
   **faixas paralelas** — 1 faixa = 1 git worktree + 1 branch + 1 janela de
-  contexto limpa — e gera três artefatos em `.spec/features/<feature>/`:
-  - `plano-execucao.md` — faixas, ondas, gestão de branches/commits e gate;
-  - `executar-tarefas.sh` — executor headless: roda `claude -p` por faixa,
-    em paralelo, com `--model` e `--effort` já definidos por tarefa, mescla
-    as branches de volta, marca as tarefas e fecha com verify + audit;
-  - `plano-execucao.html` — visual do plano com o botão **"Executar todas as
-    tarefas em janelas limpas e paralelas"** (copia o comando do script).
-- **Apresente o plano ao usuário antes de executar**: resuma as faixas, diga
-  onde estão os arquivos e ofereça as rotas — automática
-  (`bash .spec/features/<feature>/executar-tarefas.sh` ou o botão do html) ou
-  manual (você mesmo implementa faixa a faixa, seguindo branches e commits do
-  plano).
-- **Acompanhamento ao vivo (ofereça sempre)**: rode `onp-spec painel <feature>`
-  em background (Bash com run_in_background) e entregue a URL ao usuário. O
-  painel mostra, em tempo real: a árvore projeto → execução → faixa → tarefa,
-  e **o que o modelo está fazendo em cada janela headless** — ferramenta
-  chamada com o argumento, raciocínio (tokens), saída da ferramenta, e o
-  fechamento com turnos, duração e custo. O botão **"Executar todas as
-  tarefas em janelas limpas e paralelas"** dispara o script DE VERDADE, e
-  cada faixa que falha ganha um botão **"↻ reexecutar"** que roda só ela.
-  É assim que o usuário acompanha sem digitar comando nenhum.
-- **`onp-spec painel` sem feature** abre a visão global: todas as execuções de
-  TODOS os projetos, do ledger único em `~/.onp-spec/painel/ledger.jsonl`.
-  Use quando o usuário tem várias frentes rodando ao mesmo tempo.
-- **Falhou uma faixa? não reexecute tudo.** `executar-tarefas.sh --faixa <id>`
-  refaz só ela (worktree e branch da tentativa anterior são limpos antes),
-  `--seq <T-xxx>` refaz uma sequencial, `--gate` roda só o veredito, e
-  `--listar` mostra os alvos. O trabalho que já passou fica intacto.
+  contexto limpa; com `--paralelizar T-xxx,T-yyy`, só as ESCOLHIDAS entram
+  nas faixas (as demais rodam uma após a outra, ao final, na árvore
+  principal); com `--sequencial`, TODAS as tarefas rodam uma após a outra,
+  na ordem do tasks.md. Três artefatos em `.spec/features/<feature>/`:
+  - `plano-execucao.md` — faixas/ordem, gestão de branches/commits e gate;
+  - `executar-tarefas.sh` — executor headless: roda `claude -p` com `--model`
+    e `--effort` já definidos por tarefa (por faixa em paralelo, ou uma
+    tarefa por vez no modo sequencial), mescla o que houver para mesclar,
+    marca as tarefas e fecha com verify + audit;
+  - `plano-execucao.html` — visual do plano (somente leitura, sem botão).
+- **Apresente o plano ao usuário**: resuma as faixas (ou a ordem, no
+  sequencial), diga onde estão os arquivos e ofereça as rotas — automática
+  (VOCÊ roda `bash .spec/features/<feature>/executar-tarefas.sh` em
+  background, com run_in_background) ou manual (você mesmo implementa,
+  seguindo branches e commits do plano).
+- **Antes de executar, AVISE — sempre**: diga ao usuário, em uma frase, que
+  as alterações vão rodar em **background**, que a cada 1 minuto você posta
+  aqui a **tabela de andamento**, e que ao final ele recebe o **resumo
+  completo** da execução. Só então rode o script.
+- **Tabela + resumo a cada 1 minuto (obrigatórios enquanto roda)**: com o
+  script em background, a cada ~1 min poste no chat a **tabela de
+  andamento** (`onp-spec resumo <feature> --tabela` — uma linha por tarefa:
+  qual está rodando, qual não está, o que concluiu/falhou e a última ação) e
+  o **resumo** (`onp-spec resumo <feature>` — o executor grava um resumo
+  escrito por IA a cada minuto no ledger; fallback: motor). O mesmo texto
+  sai no terminal do script (`📣 resumo`). Espelhe também as tarefas na
+  lista nativa (TodoWrite). O usuário nunca fica sem saber o que está
+  rolando.
+- **Terminou? Entregue o resumo completo**: a tabela final, o que cada
+  tarefa fez (commits), o que falhou (se algo falhou) e a saída do gate
+  (verify + audit) colada e traduzida em uma frase.
+- **Falhou uma faixa? não reexecute tudo.** Leia o log e o stream, entenda a
+  causa, e rode `executar-tarefas.sh --faixa <id>` (worktree e branch da
+  tentativa anterior são limpos antes); `--seq <T-xxx>` refaz uma tarefa,
+  `--gate` roda só o veredito, e `--listar` mostra os alvos. O trabalho que
+  já passou fica intacto.
 - Mudou tasks.md ou a config (`paralelo` no onpspec.config.json)? **Regenere
   o plano** — nunca edite os artefatos à mão.
 
@@ -287,13 +307,13 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
 - **"Que código não atende requisito nenhum?"** → código órfão
   (`ARQUIVO_ORFAO`).
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
-- **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>`.
-- **"Como acompanho a execução ao vivo?"** → `onp-spec painel <feature>` (ou
-  `onp-spec painel` para todos os projetos de uma vez).
-- **"O que o modelo está fazendo agora?"** → o painel mostra o stream da
-  sessão headless: ferramenta, raciocínio, saída, custo.
+- **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>` — e
+  QUAIS tarefas paralelizar é escolha do usuário, via pergunta (multiSelect).
+- **"O que está rolando agora?"** → `onp-spec resumo <feature> --tabela` (a
+  tabela de andamento) + `onp-spec resumo <feature>` (o texto); poste os
+  dois no chat a cada ~1 min enquanto houver execução.
 - **"Só uma faixa falhou, como refaço só ela?"** →
-  `bash <baseDir>/executar-tarefas.sh --faixa <id>` (ou o botão ↻ no painel).
+  `bash <baseDir>/executar-tarefas.sh --faixa <id>`.
 - **"Onde estamos?"** → `onp-spec status`.
 
 ## Carregamento de contexto

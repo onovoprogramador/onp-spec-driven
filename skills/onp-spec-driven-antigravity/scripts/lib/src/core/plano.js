@@ -5,10 +5,17 @@
 // sem `Arquivos:` tem pegada desconhecida → roda ao final, uma a uma, na
 // árvore principal.
 //
+// PARALELIZAR É ESCOLHA DO USUÁRIO: o agente pergunta antes — inclusive QUAIS
+// tarefas paralelizar. Com `--paralelizar T-001,T-003`, só as escolhidas
+// concorrem às faixas; as demais rodam uma após a outra, na árvore principal,
+// depois das ondas. Com `--sequencial`, o plano roda TODAS as tarefas uma
+// após a outra (sem worktrees) — mesma disciplina de commits e mesmo gate.
+//
 // O CÁLCULO do plano é agnóstico de agente. Os ARTEFATOS variam:
 //   claude      → plano-execucao.md + executar-tarefas.sh (claude -p headless,
-//                 com --model e --effort por tarefa) + plano-execucao.html
-//                 (visual, com o botão "Executar todas as tarefas...")
+//                 com --model e --effort por tarefa, e o resumo geral de
+//                 andamento a cada 1 min no terminal) + plano-execucao.html
+//                 (visual, somente leitura)
 //   antigravity → plano-execucao.md com comandos de worktree e um PROMPT
 //                 pronto por faixa, para os agentes paralelos nativos do
 //                 Antigravity (nunca depende do CLI do Claude)
@@ -91,11 +98,54 @@ export function montarPlano(project, featureName, opts = {}) {
     return { erro: `todas as tarefas de "${featureName}" já estão [concluida] — nada a planejar` };
   }
 
+  // modo sequencial (escolha do usuário): nada de faixas nem worktrees —
+  // TODAS as tarefas rodam uma após a outra, na árvore principal, na ordem
+  // do tasks.md; a disciplina de commits e o gate continuam os mesmos
+  if (opts.sequencial) {
+    pendentes.sort((a, b) => a.line - b.line);
+    return fecharPlano(project, featureName, {
+      agent,
+      opts,
+      cfg,
+      avisos,
+      acTitulo,
+      concluidas,
+      modo: 'sequencial',
+      faixas: [],
+      ondas: [],
+      sequenciais: pendentes,
+    });
+  }
+
+  // seleção do usuário (--paralelizar T-001,T-003): só as escolhidas
+  // concorrem às faixas; as demais rodam ao final, uma a uma, na árvore
+  // principal — mesma disciplina de commits e mesmo gate
+  let selecao = null;
+  if (Array.isArray(opts.paralelizar)) {
+    selecao = [...new Set(opts.paralelizar)];
+    if (!selecao.length) {
+      return { erro: 'seleção vazia em --paralelizar — para rodar tudo uma após a outra, use --sequencial' };
+    }
+    const ids = new Set(pendentes.map((t) => t.id));
+    const desconhecidas = selecao.filter((id) => !ids.has(id));
+    if (desconhecidas.length) {
+      return {
+        erro: `--paralelizar cita tarefa(s) que não estão pendentes em "${featureName}": ${desconhecidas.join(', ')}`,
+      };
+    }
+  }
+
   // agrupa por conflito de arquivos: componentes conexos viram faixas
-  const comArquivos = pendentes.filter((t) => t.files.length);
-  const sequenciais = pendentes.filter((t) => !t.files.length);
+  const escolhida = (t) => !selecao || selecao.includes(t.id);
+  const comArquivos = pendentes.filter((t) => t.files.length && escolhida(t));
+  const sequenciais = pendentes.filter((t) => !t.files.length || !escolhida(t));
   for (const t of sequenciais) {
-    avisos.push(`${t.id} não lista Arquivos: — pegada desconhecida, vai rodar sozinha ao final (sem paralelismo)`);
+    if (!t.files.length) {
+      t.motivoSeq = 'sem `Arquivos:` — pegada desconhecida';
+      avisos.push(`${t.id} não lista Arquivos: — pegada desconhecida, vai rodar sozinha ao final (sem paralelismo)`);
+    } else {
+      t.motivoSeq = 'fora da seleção do usuário';
+    }
   }
 
   const faixas = [];
@@ -131,6 +181,24 @@ export function montarPlano(project, featureName, opts = {}) {
   const ondas = [];
   for (let i = 0; i < faixas.length; i += max) ondas.push(faixas.slice(i, i + max));
 
+  return fecharPlano(project, featureName, {
+    agent,
+    opts,
+    cfg,
+    avisos,
+    acTitulo,
+    concluidas,
+    modo: 'paralelo',
+    faixas,
+    ondas,
+    sequenciais,
+    paralelizar: selecao,
+  });
+}
+
+// campos comuns aos dois modos (paralelo e sequencial)
+function fecharPlano(project, featureName, { agent, opts, cfg, avisos, acTitulo, concluidas, modo, faixas, ondas, sequenciais, paralelizar = null }) {
+  const repoName = path.basename(project.config.rootDir);
   // como invocar o motor a partir da raiz do projeto
   let engine = opts.enginePath || 'onp-spec';
   if (path.isAbsolute(engine)) {
@@ -140,6 +208,7 @@ export function montarPlano(project, featureName, opts = {}) {
 
   return {
     agent,
+    modo,
     feature: featureName,
     // identidade desta execução no ledger global (muda a cada plano gerado)
     runId: opts.runId || `${repoName}-${featureName}-${Date.now().toString(36)}`,
@@ -154,6 +223,7 @@ export function montarPlano(project, featureName, opts = {}) {
     faixas,
     ondas,
     sequenciais,
+    paralelizar,
     concluidas,
     avisos,
     geradoEm: (opts.now || new Date()).toISOString().slice(0, 16).replace('T', ' '),
@@ -219,7 +289,7 @@ export function promptFaixa(plan, fx, { worktree = true } = {}) {
   ].join('\n');
 }
 
-// ── artefato: plano.json (leitura de máquina — alimenta o painel ao vivo) ──
+// ── artefato: plano.json (leitura de máquina — alimenta o ledger/resumo) ──
 
 export function renderPlanoJson(plan) {
   const tarefa = (t) => ({
@@ -235,6 +305,8 @@ export function renderPlanoJson(plan) {
       runId: plan.runId,
       feature: plan.feature,
       agent: plan.agent,
+      modo: plan.modo,
+      paralelizar: plan.paralelizar || null,
       geradoEm: plan.geradoEm,
       branchTrabalho: plan.branchTrabalho,
       baseDir: plan.baseDir,
@@ -270,19 +342,36 @@ function tabelaFaixa(plan, fx) {
   return linhas;
 }
 
+// flags que reproduzem este plano (para o "regenere com" dos artefatos)
+function flagsRegenerar(plan) {
+  if (plan.modo === 'sequencial') return ' --sequencial';
+  if (plan.paralelizar) return ` --paralelizar ${plan.paralelizar.join(',')}`;
+  return '';
+}
+
 export function renderPlanoMd(plan) {
   const L = [];
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
+  const sequencial = plan.modo === 'sequencial';
   L.push(`# Plano de execução — ${plan.feature}`);
   L.push('');
   L.push(`> gerado por \`onp-spec plano\` em ${plan.geradoEm} — NÃO edite à mão;`);
-  L.push(`> mudou tasks.md ou a config? Regenere: \`onp-spec plano ${plan.feature}\``);
+  L.push(`> mudou tasks.md ou a config? Regenere: \`onp-spec plano ${plan.feature}${flagsRegenerar(plan)}\``);
   L.push('');
   L.push('## Resumo — o que vai acontecer');
   L.push('');
-  L.push(`- **${paralelas + plan.sequenciais.length} tarefa(s) pendente(s)**: ${paralelas} em ${plan.faixas.length} faixa(s) paralela(s) + ${plan.sequenciais.length} sequencial(is)${plan.concluidas.length ? ` (${plan.concluidas.length} já concluída(s): ${plan.concluidas.map((t) => t.id).join(', ')})` : ''}`);
-  L.push(`- **1 faixa = 1 worktree + 1 branch + 1 janela de contexto limpa** — faixas não compartilham nenhum arquivo entre si`);
-  L.push(`- tudo acontece na branch de trabalho \`${plan.branchTrabalho}\`; mesclagens voltam para ela; levar para a main é decisão sua`);
+  if (sequencial) {
+    L.push(`- **modo SEQUENCIAL (escolha do usuário)**: ${plan.sequenciais.length} tarefa(s) pendente(s), UMA APÓS A OUTRA, na árvore principal${plan.concluidas.length ? ` (${plan.concluidas.length} já concluída(s): ${plan.concluidas.map((t) => t.id).join(', ')})` : ''}`);
+    L.push('- sem worktrees e sem paralelismo — cada tarefa roda numa janela de contexto limpa, na ordem do tasks.md');
+  } else {
+    L.push(`- **${paralelas + plan.sequenciais.length} tarefa(s) pendente(s)**: ${paralelas} em ${plan.faixas.length} faixa(s) paralela(s) + ${plan.sequenciais.length} sequencial(is)${plan.concluidas.length ? ` (${plan.concluidas.length} já concluída(s): ${plan.concluidas.map((t) => t.id).join(', ')})` : ''}`);
+    if (plan.paralelizar) {
+      L.push(`- **seleção do usuário**: paralelizar só ${plan.paralelizar.join(', ')} — as demais rodam uma após a outra, ao final`);
+    }
+    L.push(`- **1 faixa = 1 worktree + 1 branch + 1 janela de contexto limpa** — faixas não compartilham nenhum arquivo entre si`);
+    L.push(`- prefere outra seleção ou uma após a outra? Regenere com \`onp-spec plano ${plan.feature} --paralelizar T-xxx,T-yyy\` ou \`--sequencial\``);
+  }
+  L.push(`- tudo acontece na branch de trabalho \`${plan.branchTrabalho}\`; levar para a main é decisão sua`);
   if (plan.avisos.length) {
     L.push('');
     L.push('### Avisos');
@@ -290,63 +379,120 @@ export function renderPlanoMd(plan) {
     for (const a of plan.avisos) L.push(`- ⚠ ${a}`);
   }
   L.push('');
-  L.push('## Faixas e ondas');
-  L.push('');
-  plan.ondas.forEach((onda, i) => {
-    L.push(`### Onda ${i + 1} — ${onda.map((fx) => fx.id).join(' ∥ ')}`);
+  if (!sequencial) {
+    L.push('## Faixas e ondas');
     L.push('');
-    for (const fx of onda) {
-      L.push(`#### ${fx.id} — branch \`${fx.branch}\` — worktree \`${fx.worktree}\``);
+    plan.ondas.forEach((onda, i) => {
+      L.push(`### Onda ${i + 1} — ${onda.map((fx) => fx.id).join(' ∥ ')}`);
       L.push('');
-      L.push(...tabelaFaixa(plan, fx));
-      L.push('');
-    }
-  });
+      for (const fx of onda) {
+        L.push(`#### ${fx.id} — branch \`${fx.branch}\` — worktree \`${fx.worktree}\``);
+        L.push('');
+        L.push(...tabelaFaixa(plan, fx));
+        L.push('');
+      }
+    });
+  }
   if (plan.sequenciais.length) {
-    L.push('## Tarefas sequenciais (após as ondas, na árvore principal)');
+    L.push(sequencial ? '## Ordem de execução (uma tarefa após a outra)' : '## Tarefas sequenciais (após as ondas, na árvore principal)');
     L.push('');
-    L.push('| tarefa | título | modelo | esforço | por que sequencial |');
-    L.push('|---|---|---|---|---|');
+    L.push(`| tarefa | título | modelo | esforço |${sequencial ? '' : ' por que sequencial |'}`);
+    L.push(`|---|---|---|---|${sequencial ? '' : '---|'}`);
     for (const t of plan.sequenciais) {
-      L.push(`| ${t.id} | ${t.title} | \`${t.model}\` | ${t.esforcoCli} | sem \`Arquivos:\` — pegada desconhecida |`);
+      L.push(`| ${t.id} | ${t.title} | \`${t.model}\` | ${t.esforcoCli} |${sequencial ? '' : ` ${t.motivoSeq || '—'} |`}`);
     }
     L.push('');
   }
   L.push('## Gestão de branches e commits');
   L.push('');
   L.push(`1. branch de trabalho \`${plan.branchTrabalho}\` criada do ponto atual (se ainda não existir)`);
-  L.push('2. cada faixa nasce dela como branch própria e roda no seu worktree — **1 tarefa = 1 commit** (`T-xxx feature: título`)');
-  L.push('3. terminou a onda → merge `--no-ff` de cada faixa de volta, na ordem; conflito interrompe a faixa e pede resolução humana');
-  L.push('4. faixa mesclada → worktree removido, branch apagada, tarefa marcada `[concluida]` no tasks.md');
-  L.push(`5. gate final na branch de trabalho: \`onp-spec verify ${plan.feature}\` + \`onp-spec audit --ci\` — **exit 0 ou não está pronto**`);
+  if (sequencial) {
+    L.push('2. as tarefas rodam nela mesma, na ordem — **1 tarefa = 1 commit** (`T-xxx feature: título`), marcada `[concluida]` só com trabalho feito');
+    L.push(`3. gate final na branch de trabalho: \`onp-spec verify ${plan.feature}\` + \`onp-spec audit --ci\` — **exit 0 ou não está pronto**`);
+  } else {
+    L.push('2. cada faixa nasce dela como branch própria e roda no seu worktree — **1 tarefa = 1 commit** (`T-xxx feature: título`)');
+    L.push('3. terminou a onda → merge `--no-ff` de cada faixa de volta, na ordem; conflito interrompe a faixa e pede resolução humana');
+    L.push('4. faixa mesclada → worktree removido, branch apagada, tarefa marcada `[concluida]` no tasks.md');
+    L.push(`5. gate final na branch de trabalho: \`onp-spec verify ${plan.feature}\` + \`onp-spec audit --ci\` — **exit 0 ou não está pronto**`);
+  }
   L.push('');
   L.push('## Como executar');
   L.push('');
   if (plan.agent === 'claude') {
-    L.push('### ▶ Automático — Claude Code headless (recomendado)');
+    L.push('### ▶ Execução — Claude Code headless');
     L.push('');
     L.push('```bash');
     L.push(`bash ${plan.baseDir}/executar-tarefas.sh`);
     L.push('```');
     L.push('');
-    L.push(`Ou abra \`${plan.baseDir}/plano-execucao.html\` no navegador e use o botão`);
-    L.push('**“Executar todas as tarefas em janelas limpas e paralelas”** (copia o comando acima).');
-    L.push('');
-    L.push('Cada faixa roda `claude -p` com **janela de contexto limpa**, `--model` e `--effort` já');
-    L.push(`definidos por tarefa, permissões \`${plan.cfg.permissionMode}\`. Os prompts exatos estão`);
-    L.push('embutidos no script — quer rodar uma faixa na mão, é só copiá-los de lá.');
+    if (sequencial) {
+      L.push('Cada tarefa roda `claude -p` com **janela de contexto limpa**, na árvore principal,');
+      L.push('uma após a outra, com `--model` e `--effort` já definidos por tarefa e permissões');
+      L.push(`\`${plan.cfg.permissionMode}\`. Os prompts exatos estão embutidos no script.`);
+    } else {
+      L.push('Cada faixa roda `claude -p` com **janela de contexto limpa**, `--model` e `--effort` já');
+      L.push(`definidos por tarefa, permissões \`${plan.cfg.permissionMode}\`. Os prompts exatos estão`);
+      L.push('embutidos no script — quer rodar uma faixa na mão, é só copiá-los de lá.');
+    }
     L.push(`Logs: \`../onp-worktrees/${plan.repoName}-${plan.feature}-logs/\`.`);
     L.push('');
-    L.push('### 👀 Acompanhe ao vivo, sem digitar comandos');
+    L.push('### 📣 Acompanhamento — tabela + resumo no chat (a cada 1 min)');
+    L.push('');
+    L.push('O script roda em **background**: o agente AVISA o usuário antes de iniciar e,');
+    L.push('enquanto roda, posta no chat a cada ~1 minuto a **tabela de andamento** (qual');
+    L.push('tarefa está rodando, qual não está, o que concluiu/falhou) junto com o');
+    L.push('**resumo geral de andamento** (escrito por IA; sem IA, o motor resume). Ao');
+    L.push('final, o usuário recebe o resumo completo da execução. A qualquer momento:');
     L.push('');
     L.push('```bash');
-    L.push(`onp-spec painel ${plan.feature}`);
+    L.push(`onp-spec resumo ${plan.feature} --tabela   # a tabela de andamento`);
+    L.push(`onp-spec resumo ${plan.feature}            # o resumo em texto`);
+    L.push('```');
+  } else if (sequencial) {
+    L.push('### ▶ Sequencial no Antigravity (uma tarefa após a outra, sem Claude CLI)');
+    L.push('');
+    L.push('1. **Entre na branch de trabalho** (terminal, na raiz do repositório):');
+    L.push('');
+    L.push('```bash');
+    L.push(`git checkout -b ${plan.branchTrabalho}   # ou: git checkout ${plan.branchTrabalho}`);
     L.push('```');
     L.push('');
-    L.push('Abre um painel no navegador com as faixas em tempo real, o log de cada uma');
-    L.push('rolando ao vivo, o veredito do gate — e o botão **"Executar todas as tarefas');
-    L.push('em janelas limpas e paralelas"** que aqui executa DE VERDADE (o servidor é');
-    L.push('local, então pode disparar o script por você).');
+    L.push('2. **Execute as tarefas NA ORDEM, uma após a outra** (janela limpa por tarefa');
+    L.push('   ajuda o foco; a próxima só começa quando a anterior commitou):');
+    L.push('');
+    for (const t of plan.sequenciais) {
+      L.push(`#### Prompt — ${t.id}`);
+      L.push('');
+      L.push('```');
+      L.push(promptTarefa(plan, t));
+      L.push('```');
+      L.push('');
+      L.push(`\`node ${plan.engine} tarefa ${plan.feature} ${t.id} concluida\` após o commit.`);
+      L.push('');
+    }
+    L.push('3. **Gate final** (exit 0 ou não está pronto):');
+    L.push('');
+    L.push('```bash');
+    L.push(`node ${plan.engine} verify ${plan.feature}`);
+    L.push(`node ${plan.engine} audit --ci`);
+    L.push('```');
+    L.push('');
+    L.push('4. **Acompanhamento (a cada ~1 min, enquanto executa)**: avise ANTES de começar');
+    L.push('   que o trabalho roda em background e que o resumo completo vem ao final. Marque');
+    L.push('   cada tarefa no ledger ao começar e ao terminar (é disso que a tabela é feita):');
+    L.push('');
+    L.push('```bash');
+    L.push(`node ${plan.engine} evento --run ${plan.runId} --tipo tarefa --tarefa <T-xxx> --faixa seq --estado executando   # ao começar`);
+    L.push(`node ${plan.engine} evento --run ${plan.runId} --tipo tarefa --tarefa <T-xxx> --faixa seq --estado concluida    # após o commit`);
+    L.push('```');
+    L.push('');
+    L.push('   E a cada ~1 min poste no chat a TABELA de andamento + um parágrafo curto,');
+    L.push('   registrando o texto no ledger:');
+    L.push('');
+    L.push('```bash');
+    L.push(`node ${plan.engine} resumo ${plan.feature} --tabela   # a tabela — cole no chat`);
+    L.push(`node ${plan.engine} resumo ${plan.feature} --gravar --origem ia --texto "<2 a 4 frases do que está rolando>"`);
+    L.push('```');
   } else {
     L.push('### ▶ Paralelo nativo no Antigravity (janelas limpas, sem Claude CLI)');
     L.push('');
@@ -399,9 +545,23 @@ export function renderPlanoMd(plan) {
     L.push(`node ${plan.engine} audit --ci`);
     L.push('```');
     L.push('');
-    L.push(`6. **Acompanhe ao vivo** (opcional): \`onp-spec painel ${plan.feature}\` abre um`);
-    L.push('   painel no navegador refletindo tasks.md, as provas do verify e o gate em');
-    L.push('   tempo real enquanto os agentes trabalham — sem digitar mais nada.');
+    L.push('6. **Acompanhamento (a cada ~1 min, enquanto os agentes trabalham)**: avise ANTES');
+    L.push('   de despachar os agentes que o trabalho roda em background e que o resumo');
+    L.push('   completo vem ao final. Marque cada tarefa no ledger quando um agente começa');
+    L.push('   e quando termina (é disso que a tabela é feita):');
+    L.push('');
+    L.push('```bash');
+    L.push(`node ${plan.engine} evento --run ${plan.runId} --tipo tarefa --tarefa <T-xxx> --faixa <faixa-N> --estado executando`);
+    L.push(`node ${plan.engine} evento --run ${plan.runId} --tipo tarefa --tarefa <T-xxx> --faixa <faixa-N> --estado concluida`);
+    L.push('```');
+    L.push('');
+    L.push('   E a cada ~1 min poste no chat a TABELA de andamento + um parágrafo curto,');
+    L.push('   registrando o texto no ledger:');
+    L.push('');
+    L.push('```bash');
+    L.push(`node ${plan.engine} resumo ${plan.feature} --tabela   # a tabela — cole no chat`);
+    L.push(`node ${plan.engine} resumo ${plan.feature} --gravar --origem ia --texto "<2 a 4 frases do que está rolando>"`);
+    L.push('```');
   }
   L.push('');
   return `${L.join('\n')}\n`;
@@ -418,8 +578,8 @@ export function renderPlanoMd(plan) {
 //   bash executar-tarefas.sh --listar         → o que existe para executar
 //
 // Cada tarefa roda `claude -p --output-format stream-json`: o NDJSON cru vai
-// para o stream da tarefa no ledger global, que é o que o painel mostra ao
-// vivo (ferramentas, raciocínio, saídas, custo).
+// para o stream da tarefa no ledger global (ferramentas, raciocínio,
+// saídas, custo) — é de lá que o resumo tira a "última ação".
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -449,7 +609,7 @@ export function renderPlanoSh(plan) {
   P('#   bash executar-tarefas.sh --listar         mostra faixas, tarefas e estados');
   P('#   (acrescente --sem-gate para não rodar o gate ao final)');
   P('#');
-  P(`# acompanhe ao vivo: onp-spec painel ${plan.feature}`);
+  P(`# resumo do que está rolando, a qualquer momento: onp-spec resumo ${plan.feature}`);
   P('set -u');
   P('set -o pipefail');
   P('');
@@ -461,6 +621,8 @@ export function renderPlanoSh(plan) {
   P('STREAM_FLAGS=(--output-format stream-json --verbose)');
   P('FALHAS=""');
   P('COM_GATE=1');
+  P(`RESUMO_MODEL=${shq(plan.cfg.resumoModel || 'claude-haiku-4-5')}`);
+  P('RESUMO_PID=""');
   P('');
   P(`verde()    { printf '\\033[32m%s\\033[0m\\n' "$*"; }`);
   P(`vermelho() { printf '\\033[31m%s\\033[0m\\n' "$*"; }`);
@@ -469,7 +631,7 @@ export function renderPlanoSh(plan) {
   P('falhar()   { vermelho "✘ $*"; exit 1; }');
   P('');
   P('# eventos vão para o ledger GLOBAL (~/.onp-spec/painel/ledger.jsonl):');
-  P('# um arquivo para todos os projetos, é o que o painel lê');
+  P('# um arquivo para todos os projetos, é o que o onp-spec resumo lê');
   P('evento() { node "$ENGINE" evento --run "$RUN_ID" "$@" >/dev/null 2>&1 || true; }');
   P('');
   P('# ── ambiente (todos os modos passam por aqui) ────────────────────────');
@@ -516,7 +678,7 @@ export function renderPlanoSh(plan) {
   P('  git worktree add "$3" -b "$2" >/dev/null 2>&1 || { vermelho "✘ não consegui criar o worktree de $1 em $3"; return 1; }');
   P('}');
   P('');
-  P('tentativa() { # $1=faixa — conta reexecuções para o painel mostrar');
+  P('tentativa() { # $1=faixa — conta reexecuções (vai para o ledger)');
   P('  local arq="$LOG_DIR/.tentativa-$1"');
   P('  local n=1');
   P('  [ -f "$arq" ] && n=$(( $(cat "$arq") + 1 ))');
@@ -525,7 +687,7 @@ export function renderPlanoSh(plan) {
   P('}');
   P('');
   P('# uma tarefa = uma sessão claude headless com contexto limpo.');
-  P('# o NDJSON do stream-json vira o stream da tarefa (o painel mostra ao vivo)');
+  P('# o NDJSON do stream-json vira o stream da tarefa no ledger');
   P('rodar_tarefa() { # $1=escopo(faixa|seq) $2=T-xxx $3=prompt $4=modelo $5=esforço');
   P('  local chave="$1--$2"');
   P('  local stream="$STREAMS_DIR/$chave.jsonl"');
@@ -565,6 +727,43 @@ export function renderPlanoSh(plan) {
   P('marcar_concluidas() { # $@=T-xxx');
   P('  for t in "$@"; do node "$ENGINE" tarefa "$FEATURE" "$t" concluida >/dev/null || true; done');
   P('}');
+  P('');
+  P('# ── resumo geral de andamento: 1/min enquanto a execução roda ─────────');
+  P('# escrito por IA (claude -p, sem ferramentas) com fallback do motor; vai');
+  P('# para o terminal e para o ledger — o agente repassa o texto no chat.');
+  P('gerar_resumo() {');
+  P('  local ctx ia');
+  P('  ctx=$(node "$ENGINE" resumo "$FEATURE" --contexto 2>/dev/null) || ctx=""');
+  P('  [ -n "$ctx" ] || return 0');
+  P('  ia=$(claude -p "Você narra, para o dono do produto, uma execução de tarefas de código em andamento. Estado mecânico:');
+  P('');
+  P('$ctx');
+  P('');
+  P('Escreva o RESUMO GERAL DE ANDAMENTO: um parágrafo único de 2 a 4 frases, em português simples, dizendo o que está acontecendo agora, o que já terminou, o que falhou e se o usuário precisa agir. Sem markdown, sem listas." --model "$RESUMO_MODEL" 2>/dev/null)');
+  P('  if [ -n "$ia" ]; then');
+  P('    node "$ENGINE" resumo "$FEATURE" --gravar --origem ia --texto "$ia" >/dev/null 2>&1 || true');
+  P(`    printf '\\n📣 resumo (IA): %s\\n' "$ia"`);
+  P('  else');
+  P('    node "$ENGINE" resumo "$FEATURE" --gravar >/dev/null 2>&1 || true');
+  P(`    printf '\\n📣 resumo: %s\\n' "$(node "$ENGINE" resumo "$FEATURE" 2>/dev/null)"`);
+  P('  fi');
+  P('}');
+  P('');
+  P('# mata o loop E o sleep filho — senão o sleep herda o stdout e quem chamou');
+  P('# o script via pipe fica esperando EOF por até 60s depois do exit');
+  P('parar_resumos() {');
+  P('  [ -n "$RESUMO_PID" ] || return 0');
+  P('  command -v pkill >/dev/null 2>&1 && pkill -P "$RESUMO_PID" 2>/dev/null');
+  P('  kill "$RESUMO_PID" 2>/dev/null');
+  P('  RESUMO_PID=""');
+  P('}');
+  P('');
+  P('iniciar_resumos() {');
+  P('  ( while :; do sleep 60; gerar_resumo; done ) &');
+  P('  RESUMO_PID=$!');
+  P('  # ao sair: para o loop e grava um último resumo (o estado final, do motor)');
+  P(`  trap 'parar_resumos; node "$ENGINE" resumo "$FEATURE" --gravar >/dev/null 2>&1 || true' EXIT`);
+  P('}');
 
   // ── uma função por faixa ────────────────────────────────────────────────
   for (const fx of plan.faixas) {
@@ -593,7 +792,7 @@ export function renderPlanoSh(plan) {
   // ── uma função por tarefa sequencial ────────────────────────────────────
   for (const t of plan.sequenciais) {
     P('');
-    P(`# ── sequencial ${t.id} (sem Arquivos: — pegada desconhecida) ──`);
+    P(`# ── sequencial ${t.id} (${(t.motivoSeq || 'ordem do tasks.md').replace(/`/g, '')}) ──`);
     P(`executar_seq_${fn(t.id)}() {`);
     P(`  info ${shq(`sequencial ${t.id} — ${t.title}`)}`);
     P(`  if rodar_tarefa seq ${shq(t.id)} ${shq(promptTarefa(plan, t))} ${shq(t.model)} ${t.esforcoCli} >> "$LOG_DIR/seq.log" 2>&1; then`);
@@ -658,7 +857,7 @@ export function renderPlanoSh(plan) {
   P('  fi');
   P('  evento --tipo fim --exit 1 --escopo "$1"');
   P('  vermelho "plano terminou com pendências — leia a saída do audit acima e os logs em $LOG_DIR"');
-  P(`  amarelo "dica: reexecute só o que falhou (--faixa <id> / --seq <T-xxx>) e acompanhe em: onp-spec painel ${plan.feature}"`);
+  P('  amarelo "dica: reexecute só o que falhou (--faixa <id> / --seq <T-xxx>)"');
   P('  exit 1');
   P('}');
 
@@ -666,8 +865,9 @@ export function renderPlanoSh(plan) {
   P('');
   P('executar_tudo() {');
   P('  evento --tipo inicio --escopo tudo');
-  P('  info "logs por faixa em: $LOG_DIR"');
-  P(`  info "acompanhe ao vivo: onp-spec painel ${plan.feature}"`);
+  P('  iniciar_resumos');
+  P('  info "logs em: $LOG_DIR"');
+  P('  info "resumo geral de andamento: a cada 1 min aqui no terminal (e via: onp-spec resumo)"');
   plan.ondas.forEach((onda, oi) => {
     P(`  # onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')}`);
     P(`  info "onda ${oi + 1}: ${onda.map((fx) => fx.id).join(' ∥ ')} — janelas limpas em paralelo"`);
@@ -719,18 +919,18 @@ export function renderPlanoSh(plan) {
   P('');
   P('case "$MODO" in');
   P('  tudo) executar_tudo ;;');
-  P('  gate) COM_GATE=1; encerrar gate ;;');
+  P('  gate) COM_GATE=1; iniciar_resumos; encerrar gate ;;');
   P('  faixa)');
   P('    case "$ALVO" in');
   for (const fx of plan.faixas) {
-    P(`      ${fx.id}) evento --tipo inicio --escopo "faixa:${fx.id}"; executar_${fn(fx.id)} || true; encerrar "faixa:${fx.id}" ;;`);
+    P(`      ${fx.id}) evento --tipo inicio --escopo "faixa:${fx.id}"; iniciar_resumos; executar_${fn(fx.id)} || true; encerrar "faixa:${fx.id}" ;;`);
   }
   P('      *) falhar "faixa desconhecida: \'$ALVO\' — veja as disponíveis com --listar" ;;');
   P('    esac ;;');
   P('  seq)');
   P('    case "$ALVO" in');
   for (const t of plan.sequenciais) {
-    P(`      ${t.id}) evento --tipo inicio --escopo "seq:${t.id}"; executar_seq_${fn(t.id)} || true; encerrar "seq:${t.id}" ;;`);
+    P(`      ${t.id}) evento --tipo inicio --escopo "seq:${t.id}"; iniciar_resumos; executar_seq_${fn(t.id)} || true; encerrar "seq:${t.id}" ;;`);
   }
   P(`      *) falhar "tarefa sequencial desconhecida: '$ALVO' — veja as disponíveis com --listar" ;;`);
   P('    esac ;;');
@@ -746,12 +946,13 @@ const esc = (s) =>
 export function renderPlanoHtml(plan) {
   const cmd = `bash ${plan.baseDir}/executar-tarefas.sh`;
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
+  const sequencial = plan.modo === 'sequencial';
   const card = (t) => `
         <div class="tarefa">
           <span class="tid">${esc(t.id)}</span>
           <span class="ttitulo">${esc(t.title)}</span>
           <span class="meta"><code>${esc(t.model)}</code> · esforço <b>${esc(t.esforcoCli)}</b></span>
-          <span class="arquivos">${t.files.map((f) => `<code>${esc(f)}</code>`).join(' ') || '<em>sem arquivos — sequencial</em>'}</span>
+          <span class="arquivos">${t.files.map((f) => `<code>${esc(f)}</code>`).join(' ') || `<em>${esc((t.motivoSeq || 'sem arquivos — sequencial').replace(/`/g, ''))}</em>`}</span>
         </div>`;
   const faixaHtml = (fx) => `
       <div class="faixa">
@@ -770,7 +971,7 @@ export function renderPlanoHtml(plan) {
   const seqHtml = plan.sequenciais.length
     ? `
     <section class="onda">
-      <h3>Sequenciais <small>após as ondas, na árvore principal</small></h3>
+      <h3>${sequencial ? 'Ordem de execução <small>uma tarefa após a outra, na árvore principal</small>' : 'Sequenciais <small>após as ondas, na árvore principal</small>'}</h3>
       <div class="grade"><div class="faixa">${plan.sequenciais.map(card).join('')}</div></div>
     </section>`
     : '';
@@ -802,13 +1003,9 @@ export function renderPlanoHtml(plan) {
                 padding:.5rem .9rem } .resumo b { font-size:1.2rem }
   .executor { background:var(--card); border:1px solid var(--borda); border-radius:10px;
               padding:1rem; margin:0 0 .5rem }
-  button { background:var(--acc); color:var(--acc-fg); border:0; border-radius:8px;
-           padding:.8rem 1.2rem; font:600 1rem system-ui; cursor:pointer; max-width:100% }
-  button:hover { filter:brightness(1.1) }
+  .executor h2 { margin:0 0 .5rem; font-size:1.05rem }
   .nota { color:var(--sub); font-size:.85rem; margin:.5rem 0 0 }
   #cmd { display:inline-block; margin-top:.6rem }
-  #toast { visibility:hidden; margin-left:.75rem; color:var(--acc); font-weight:600 }
-  #toast.on { visibility:visible }
   .grade { display:grid; grid-template-columns:repeat(auto-fit,minmax(17rem,1fr)); gap:.75rem }
   .faixa { background:var(--card); border:1px solid var(--borda); border-radius:10px; padding: .9rem }
   .tarefa { display:flex; flex-direction:column; gap:.15rem; padding:.6rem 0;
@@ -824,21 +1021,32 @@ export function renderPlanoHtml(plan) {
   <h1>Plano de execução — ${esc(plan.feature)}</h1>
   <p class="sub">gerado por <code>onp-spec plano</code> em ${esc(plan.geradoEm)} · regenere após mudar tasks.md</p>
   <div class="resumo">
-    <div><b>${paralelas}</b> tarefa(s) em paralelo</div>
+    ${
+      sequencial
+        ? `<div><b>${plan.sequenciais.length}</b> tarefa(s), uma após a outra</div>
+    <div>modo <b>sequencial</b> (escolha do usuário)</div>`
+        : `<div><b>${paralelas}</b> tarefa(s) em paralelo</div>
     <div><b>${plan.faixas.length}</b> faixa(s) · <b>${plan.ondas.length}</b> onda(s)</div>
-    <div><b>${plan.sequenciais.length}</b> sequencial(is)</div>
+    <div><b>${plan.sequenciais.length}</b> sequencial(is)</div>${
+      plan.paralelizar ? `\n    <div>seleção do usuário: <b>${plan.paralelizar.map(esc).join(', ')}</b></div>` : ''
+    }`
+    }
     <div>branch <code>${esc(plan.branchTrabalho)}</code></div>
   </div>
   ${avisosHtml}
   <div class="executor">
-    <button onclick="copiar()">▶ Executar todas as tarefas em janelas limpas e paralelas</button>
-    <span id="toast">comando copiado ✔ — cole no terminal</span>
+    <h2>Como executar — via agente</h2>
+    <p>Peça ao agente (Claude Code) para executar o plano. Ele roda:</p>
     <div><code id="cmd">${esc(cmd)}</code></div>
-    <p class="nota">Este arquivo é estático: o botão copia o comando; cole no terminal, na raiz
-    do projeto. Cada faixa roda <code>claude -p</code> num worktree próprio, com contexto limpo,
-    modelo e esforço já definidos. O gate final (verify + audit) roda sozinho.
-    <b>Quer acompanhar ao vivo e executar com um clique de verdade?</b> Rode
-    <code>onp-spec painel ${esc(plan.feature)}</code> — abre a versão viva deste painel.</p>
+    <p class="nota">Este arquivo é só visualização. ${
+      sequencial
+        ? 'Cada tarefa roda <code>claude -p</code> na árvore principal, uma após a outra, com contexto limpo e modelo/esforço já definidos.'
+        : 'Cada faixa roda <code>claude -p</code> num worktree próprio, com contexto limpo, modelo e esforço já definidos.'
+    }
+    O gate final (verify + audit) roda sozinho; a execução fica em background e, a cada
+    1 minuto, o agente posta no chat a <b>tabela de andamento</b>
+    (<code>onp-spec resumo ${esc(plan.feature)} --tabela</code>) e o
+    <b>resumo geral de andamento</b> (<code>onp-spec resumo ${esc(plan.feature)}</code>).</p>
   </div>
   ${ondasHtml}
   ${seqHtml}
@@ -846,24 +1054,15 @@ export function renderPlanoHtml(plan) {
     <h3>Branches e commits</h3>
     <ol>
       <li>tudo parte da branch de trabalho <code>${esc(plan.branchTrabalho)}</code></li>
-      <li>1 faixa = 1 branch + 1 worktree; 1 tarefa = 1 commit <code>T-xxx ${esc(plan.feature)}: título</code></li>
-      <li>merge <code>--no-ff</code> por faixa, na ordem; conflito interrompe e pede você</li>
+      ${
+        sequencial
+          ? `<li>as tarefas rodam nela mesma, na ordem; 1 tarefa = 1 commit <code>T-xxx ${esc(plan.feature)}: título</code></li>`
+          : `<li>1 faixa = 1 branch + 1 worktree; 1 tarefa = 1 commit <code>T-xxx ${esc(plan.feature)}: título</code></li>
+      <li>merge <code>--no-ff</code> por faixa, na ordem; conflito interrompe e pede você</li>`
+      }
       <li>gate final: <code>onp-spec verify ${esc(plan.feature)}</code> + <code>onp-spec audit --ci</code> — exit 0 ou não está pronto</li>
     </ol>
   </section>
 </main>
-<script>
-  async function copiar() {
-    var cmd = document.getElementById('cmd').textContent;
-    try { await navigator.clipboard.writeText(cmd); }
-    catch (e) {
-      var ta = document.createElement('textarea');
-      ta.value = cmd; document.body.appendChild(ta); ta.select();
-      document.execCommand('copy'); ta.remove();
-    }
-    var t = document.getElementById('toast');
-    t.classList.add('on'); setTimeout(function(){ t.classList.remove('on'); }, 2500);
-  }
-</script>
 `;
 }

@@ -33,6 +33,8 @@ export const DEFAULT_CONFIG = {
     permissionMode: 'acceptEdits',
     // override da lista --allowedTools (null = derivada do testCommand + git)
     allowedTools: null,
+    // modelo que escreve o "resumo geral de andamento" a cada minuto
+    resumoModel: 'claude-haiku-4-5',
   },
 };
 

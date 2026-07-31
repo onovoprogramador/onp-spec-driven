@@ -16,8 +16,7 @@
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
     "bench": "node benchmark/run.js",
-    "prepublishOnly": "npm test",
-    "test:ui": "node --test \"test/ui/**/*.test.js\""
+    "prepublishOnly": "npm test"
   },
   "files": [
     "bin/",
@@ -37,8 +36,5 @@
     "claude-code"
   ],
   "author": "Vitor Manoel — O Novo Programador",
-  "license": "MIT",
-  "devDependencies": {
-    "playwright": "^1.62.0"
-  }
+  "license": "MIT"
 }

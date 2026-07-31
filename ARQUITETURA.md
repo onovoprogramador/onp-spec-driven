@@ -185,30 +185,47 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
   permission-mode `paralelo.permissionMode` default acceptEdits + allowedTools
   derivada do testCommand; valida ambiente e árvore limpa; auto-commita
   artefatos do plano; mescla, marca `[concluida]` via `onp-spec tarefa`, fecha
-  a contabilidade no git e roda o gate) e `plano-execucao.html` (visual com o
-  botão que copia o comando do script).
+  a contabilidade no git e roda o gate) e `plano-execucao.html` (visual,
+  somente leitura).
 
   O script é um **dispatcher**, não um roteiro linear: cada faixa e cada
   sequencial é uma função, então `--faixa <id>` reexecuta só a que falhou
   (limpando worktree e branch da tentativa anterior antes de recriar),
   `--seq <T-xxx>` refaz uma sequencial, `--gate` roda só o veredito e
   `--listar` mostra os alvos. Cada tentativa é contada e vai para o ledger.
+  Enquanto roda, um loop em background imprime no terminal, a cada ~1 min, o
+  **resumo geral de andamento** (via `claude -p`, modelo `paralelo.resumoModel`
+  default haiku; fallback determinístico) e o grava no ledger — no exit, um
+  trap (`pkill -P` no loop, senão o `sleep` órfão segura o stdout de quem
+  chamou via pipe) registra o resumo final.
 - **antigravity**: o md ganha comandos de worktree e um prompt pronto por
   faixa para os agentes paralelos nativos — nunca depende do CLI do Claude.
+
+**Paralelizar é escolha do usuário — inclusive QUAIS tarefas**: o agente
+apresenta o plano como recomendação e pergunta antes de executar.
+`--paralelizar T-001,T-003` restringe as faixas às tarefas ESCOLHIDAS (o
+resto vai para `sequenciais` com `motivoSeq` "fora da seleção do usuário";
+id desconhecido ou seleção vazia é erro amigável; a seleção sai em
+`paralelizar` no plano.json e no "regenere com" dos artefatos).
+`--sequencial` gera o plano com TODAS as tarefas em `sequenciais` (uma após a
+outra, na árvore principal, sem worktrees — `modo: "sequencial"` no
+plano.json), reaproveitando o mesmo executor, a mesma disciplina de commits e
+o mesmo gate.
 
 `onp-spec tarefa <feature> <T-xxx> <status>` é o utilitário mecânico de
 atualização de status usado pelo executor (e por humanos).
 
 O plano também sai em `plano.json` (leitura de máquina) e o script emite uma
-trilha de eventos (`<logs>/plano-eventos.log`: faixa executando/mesclada/
-conflito, tarefas, gate, fim) — é o que alimenta o painel.
+trilha de eventos (faixa executando/mesclada/conflito, tarefas, gate, fim,
+resumo) para o ledger global — é o que alimenta o `onp-spec resumo`.
 
 ## Ledger global (src/core/ledger.js)
 
 Estado de execução NÃO mora no repositório do usuário: mora num **arquivo
 único, global**, `~/.onp-spec/painel/ledger.jsonl` (raiz configurável por
-`ONP_SPEC_HOME`, o que também isola os testes). Cada linha é um evento
-(`plano`, `inicio`, `faixa`, `tarefa`, `gate`, `fim`) carimbado com `runId`,
+`ONP_SPEC_HOME`, o que também isola os testes; o segmento `painel/` no
+caminho é herança histórica). Cada linha é um evento (`plano`, `inicio`,
+`faixa`, `tarefa`, `gate`, `fim`, `resumo`) carimbado com `runId`,
 `projeto`, `projetoDir` e `feature` — então um mesmo ledger cobre quantos
 projetos existirem, e `montarArvore()` reconstrói projeto → execução → faixa →
 tarefa a partir dele. `podarLedger()` mantém as 30 execuções mais recentes e
@@ -225,29 +242,29 @@ stream-json --verbose`, em `~/.onp-spec/painel/streams/<runId>/<faixa>--<T-xxx>.
 `resumirStream()` traduz para uma linha do tempo (`inicio`, `ferramenta`,
 `pensando`, `saida`, `texto`, `fim`) com corte de tamanho e leitura
 incremental por cursor de linhas. Observação honesta: em headless o bloco
-`thinking` costuma vir redigido (vazio + signature); o painel mostra a
-atividade e a contagem de `system/thinking_tokens`, e diz que o conteúdo não
-foi exposto — não inventa raciocínio.
+`thinking` costuma vir redigido (vazio + signature); a contagem de
+`system/thinking_tokens` mostra a atividade sem inventar raciocínio.
 
-## Painel ao vivo (src/core/painel.js)
+## Resumo geral de andamento (src/core/resumo.js)
 
-`onp-spec painel [feature]` sobe um servidor HTTP local zero-dependências
-(node:http, bind exclusivo em 127.0.0.1). **Sem feature** mostra todos os
-projetos do ledger; com feature, filtra. O cliente sonda `/api/estado` a cada
-1s e busca o stream da tarefa selecionada por `/api/stream?run&chave&desde`
-(incremental — só o que chegou). O front segue sozinho a tarefa em execução
-(e, quando nada roda, a que falhou), então acompanhar não exige clique.
+`onp-spec resumo [feature]` é a resposta de "o que está rolando agora?" em
+texto — o agente posta esse parágrafo no chat a cada ~1 min enquanto houver
+execução; **não existe servidor nem UI web**: o acompanhamento é chat e
+terminal, por decisão de produto. `--tabela` (`tabelaAndamento()`) imprime a
+**tabela de andamento** em markdown — uma linha por tarefa (onde roda,
+status ⏳/▶️/✅/❌ e última ação do stream; células higienizadas de pipes e
+quebras), com rodapé de faixas falhadas e gate — pronta para o agente colar
+no chat junto com o texto; a execução roda em background e o usuário recebe
+o resumo completo ao final.
 
-Ações: `POST /executar {runId, escopo}` dispara o `executar-tarefas.sh` de
-verdade, com `escopo` traduzido por `argsDoEscopo()` para `[]` / `--gate` /
-`--faixa <id>` / `--seq <T-xxx>` — qualquer outro valor é recusado (nada de
-argumento arbitrário chegando ao shell). Protegido por token de sessão
-embutido na página + checagem de Host (mitiga CSRF e DNS-rebinding). Plano do
-Antigravity responde 409: lá a execução é dos agentes nativos e o painel só
-acompanha.
-
-Testes de interface (navegador real, Playwright) ficam em `test/ui/` e rodam
-com `npm run test:ui` — fora do `npm test` para o pacote seguir zero-deps.
+Duas origens, sempre rotuladas: `ia` (o executor claude grava via
+`resumo --gravar --origem ia --texto`; no Antigravity é o próprio agente que
+escreve) e `motor` (determinístico: `resumoDeterministico()` narra a árvore
+do ledger — concluídas, tarefa em execução com a última ação do stream via
+`ultimaAcao()` (tail barato do NDJSON), falhas/conflitos e gate). Regra de
+frescor em `montarResumoAtual()`: resumo de IA com mais de 2 min perde para o
+do motor — um texto velho afirmando "executando" seria mentira. `--contexto`
+imprime o estado mecânico que o modelo narrador consome.
 
 ## Camada de lições (src/core/sinais.js + src/core/licoes.js)
 

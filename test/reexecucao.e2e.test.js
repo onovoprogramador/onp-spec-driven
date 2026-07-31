@@ -1,7 +1,7 @@
 // E2E do que o usuário pediu: uma faixa falha, e dá para reexecutar SÓ ela.
 // Usa um stub do `claude` que emite stream-json de verdade (mesmos tipos de
 // evento do CLI real), então também prova que o stream chega ao ledger e que
-// o painel teria o que mostrar.
+// o `onp-spec resumo` teria o que narrar.
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -176,6 +176,13 @@ test('execução completa: faixa-2 falha, faixa-1 conclui e o stream fica gravad
   const falha = lerStream(ex.runId, 'faixa-2--T-002');
   assert.equal(falha.resumo.status, 'erro');
   assert.ok(falha.itens.some((i) => i.tipo === 'saida' && i.erro), 'o erro da ferramenta aparece no stream');
+
+  // o trap de saída gravou o resumo final no ledger (nunca silêncio)
+  assert.ok(lerEventos().some((e) => e.tipo === 'resumo' && e.runId === ex.runId));
+  // e `onp-spec resumo` narra o estado com o que está no ledger
+  const resumo = cli(['resumo', 'pagamentos']);
+  assert.equal(resumo.status, 0, resumo.stderr);
+  assert.match(resumo.stdout, /faixa-2 falhou — peça ao agente/);
 });
 
 test('reexecutar SÓ a faixa que falhou: nova tentativa, sem tocar na faixa que já passou', () => {
