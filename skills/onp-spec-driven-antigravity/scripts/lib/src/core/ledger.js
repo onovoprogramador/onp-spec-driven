@@ -18,8 +18,10 @@
 //   resumo {runId, texto, origem: ia|motor} — o "resumo geral de andamento"
 //          que o executor grava a cada ~1 min e o agente repassa no chat
 //
-// O stream de cada tarefa é o NDJSON cru do `claude -p --output-format
-// stream-json` — o parser abaixo transforma em linha do tempo legível.
+// O stream de cada tarefa é o JSONL cru do CLI headless do agente —
+// `claude -p --output-format stream-json` (eventos system/assistant/user/
+// result) ou `codex exec --json` (eventos thread.*/turn.*/item.*) — e o
+// parser abaixo transforma qualquer um dos dois em linha do tempo legível.
 
 import os from 'os';
 import path from 'path';
@@ -242,6 +244,28 @@ export function resumoFerramenta(nome, input = {}) {
   }
 }
 
+// resumo de uma linha por item do codex (`codex exec --json`): devolve
+// {nome, resumo} para itens tipo ferramenta, ou null para os que têm
+// tratamento próprio (mensagem, raciocínio, fim)
+export function resumoItemCodex(item = {}) {
+  switch (item.type) {
+    case 'command_execution':
+      return { nome: 'Bash', resumo: corta(item.command, 200) };
+    case 'file_change': {
+      const mudancas = (item.changes || []).map((c) => `${c.kind || '?'} ${String(c.path || '').split('/').slice(-3).join('/')}`);
+      return { nome: 'Edição', resumo: corta(mudancas.join(', '), 200) };
+    }
+    case 'mcp_tool_call':
+      return { nome: [item.server, item.tool].filter(Boolean).join('.') || 'MCP', resumo: '' };
+    case 'web_search':
+      return { nome: 'WebSearch', resumo: corta(item.query, 120) };
+    case 'todo_list':
+      return { nome: 'Plano', resumo: `${(item.items || []).length} item(ns)` };
+    default:
+      return null;
+  }
+}
+
 function textoDeConteudo(conteudo) {
   if (typeof conteudo === 'string') return conteudo;
   if (Array.isArray(conteudo)) {
@@ -261,6 +285,7 @@ export function resumirStream(texto, { desde = 0 } = {}) {
   const itens = [];
   let resumo = null;
   let pensando = null;
+  let turnosCodex = 0;
 
   for (const linha of novas) {
     let e;
@@ -323,6 +348,62 @@ export function resumirStream(texto, { desde = 0 } = {}) {
         tokensEntrada: e.usage?.input_tokens ?? null,
       };
       itens.push({ tipo: 'fim', ...resumo, texto: corta(e.result, 600) });
+    } else if (e.type === 'thread.started') {
+      // codex exec --json: começo da sessão
+      itens.push({ tipo: 'inicio', modelo: e.model || null, sessao: String(e.thread_id || '').slice(0, 8) });
+    } else if (e.type === 'item.completed' && e.item) {
+      const item = e.item;
+      if (item.type === 'reasoning') {
+        const t = String(item.text || '');
+        if (t.trim()) {
+          if (pensando) pensando.texto = corta(t, 1200);
+          else {
+            pensando = { tipo: 'pensando', tokens: null, texto: corta(t, 1200) };
+            itens.push(pensando);
+          }
+        }
+      } else if (item.type === 'agent_message') {
+        pensando = null;
+        if (String(item.text || '').trim()) itens.push({ tipo: 'texto', texto: corta(item.text, 1200) });
+      } else if (item.type === 'error') {
+        pensando = null;
+        itens.push({ tipo: 'saida', erro: true, texto: corta(item.message, 600) });
+      } else {
+        const fer = resumoItemCodex(item);
+        if (fer) {
+          pensando = null;
+          itens.push({
+            tipo: 'ferramenta',
+            nome: fer.nome,
+            resumo: fer.resumo,
+            detalhe: corta(JSON.stringify(item, null, 2), 1200),
+          });
+          // no codex, comando e saída chegam no MESMO item — o parser separa
+          // para a linha do tempo ficar igual à do claude (ferramenta + saída)
+          if (item.type === 'command_execution' && item.aggregated_output != null) {
+            itens.push({
+              tipo: 'saida',
+              erro: item.exit_code != null && item.exit_code !== 0,
+              texto: corta(item.aggregated_output, 600),
+            });
+          }
+        }
+      }
+    } else if (e.type === 'turn.completed' || e.type === 'turn.failed') {
+      pensando = null;
+      turnosCodex += 1;
+      resumo = {
+        status: e.type === 'turn.failed' ? 'erro' : 'sucesso',
+        duracaoMs: null,
+        turnos: turnosCodex,
+        custoUsd: null,
+        tokensSaida: e.usage?.output_tokens ?? null,
+        tokensEntrada: e.usage?.input_tokens ?? null,
+      };
+      itens.push({ tipo: 'fim', ...resumo, texto: corta(e.error?.message || '', 600) });
+    } else if (e.type === 'error') {
+      pensando = null;
+      itens.push({ tipo: 'saida', erro: true, texto: corta(e.message, 600) });
     }
   }
 

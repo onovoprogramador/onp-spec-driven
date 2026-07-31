@@ -67,6 +67,33 @@ test('motor embarcado de uma skill NÃO instala a skill do outro agente como se 
   assert.ok(!existsSync(path.join(root, '.agents', 'skills', 'onp-spec-driven', 'SKILL.md')));
 });
 
+test('init --agents codex NÃO sobrescreve a skill do Antigravity (compartilham .agents/skills)', () => {
+  assert.equal(cli('init', '--agents', 'antigravity').code, 0);
+  const { code, out } = cli('init', '--agents', 'codex');
+  assert.equal(code, 2, out);
+  assert.match(out, /já contém a skill do agente "antigravity"/);
+  assert.match(out, /rm -rf/);
+  // a skill do Antigravity ficou intacta
+  const skillMd = path.join(root, '.agents', 'skills', 'onp-spec-driven', 'SKILL.md');
+  assert.match(readFileSync(skillMd, 'utf-8'), /agent: antigravity/);
+});
+
+test('init --agents codex instala a skill do Codex em .agents/skills/ (o diretório de skills do Codex)', () => {
+  rmSync(path.join(root, '.agents'), { recursive: true, force: true });
+  const { code, out } = cli('init', '--agents', 'codex');
+  assert.equal(code, 0, out);
+  const skillMd = path.join(root, '.agents', 'skills', 'onp-spec-driven', 'SKILL.md');
+  assert.ok(existsSync(skillMd));
+  const conteudo = readFileSync(skillMd, 'utf-8');
+  assert.match(conteudo, /agent: codex/);
+  assert.match(conteudo, /Codex/);
+  // autossuficiente: o motor embarcado veio junto
+  assert.ok(existsSync(path.join(root, '.agents', 'skills', 'onp-spec-driven', 'scripts', 'onp-spec.mjs')));
+  // e rodar de novo mantém, sem reclamar
+  const denovo = cli('init', '--agents', 'codex');
+  assert.equal(denovo.code, 0, denovo.out);
+});
+
 const SPEC = `# Spec: Pagamentos
 
 > feature: pagamentos
@@ -212,6 +239,53 @@ test('plano (antigravity): md com prompts por faixa, sem sh/html novos e sem cla
   assert.equal(JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8')).agent, 'antigravity');
 });
 
+test('plano (codex): md + sh com codex exec (bash válido) + html — sem claude -p', () => {
+  const dir = path.join(root, '.spec', 'features', 'pagamentos');
+  const { code, out } = cli('plano', 'pagamentos', '--agents', 'codex');
+  assert.equal(code, 0, out);
+  assert.match(out, /plano de execução \(codex\)/);
+  assert.match(out, /executor headless/);
+  // T-002 pedia claude-opus-5 — no codex isso vira o default com aviso
+  assert.match(out, /claude-opus-5/);
+
+  const md = readFileSync(path.join(dir, 'plano-execucao.md'), 'utf-8');
+  assert.match(md, /Execução — Codex headless \(codex exec\)/);
+  assert.doesNotMatch(md, /claude -p/);
+
+  const shPath = path.join(dir, 'executar-tarefas.sh');
+  assert.ok(statSync(shPath).mode & 0o100, 'script precisa ser executável');
+  const bashN = spawnSync('bash', ['-n', shPath], { encoding: 'utf-8' });
+  assert.equal(bashN.status, 0, `bash -n falhou: ${bashN.stderr}`);
+  const sh = readFileSync(shPath, 'utf-8');
+  assert.match(sh, /codex exec "\$3" --model "\$4" -c model_reasoning_effort="\$5"/);
+  assert.match(sh, /STREAM_FLAGS=\(--json\)/);
+  assert.match(sh, /--sandbox 'workspace-write'/);
+  assert.match(sh, /rodar_tarefa 'faixa-2' 'T-002' '[\s\S]*?' 'gpt-5.6-terra' high/);
+  assert.doesNotMatch(sh, /claude -p/);
+  assert.match(sh, /audit --ci/);
+
+  // dispatcher igual ao do claude: reexecução por faixa disponível
+  const listar = spawnSync('bash', [shPath, '--listar'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(listar.status, 0, listar.stderr);
+  assert.match(listar.stdout, /faixa-1\s+onda 1\s+T-001, T-003/);
+  assert.match(listar.stdout, /reexecutar uma faixa/);
+
+  const html = readFileSync(path.join(dir, 'plano-execucao.html'), 'utf-8');
+  assert.doesNotMatch(html, /<button/);
+  assert.match(html, /codex exec/);
+  assert.match(html, /Peça ao agente \(Codex\)/);
+  assert.doesNotMatch(html, /claude -p/);
+
+  const planoJson = JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8'));
+  assert.equal(planoJson.agent, 'codex');
+  assert.equal(planoJson.modo, 'paralelo');
+  assert.equal(planoJson.faixas.length, 2);
+});
+
 test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {
   const { code, out } = cli('tarefa', 'pagamentos', 'T-002', 'concluida');
   assert.equal(code, 0, out);
@@ -242,8 +316,26 @@ test('upgrade: plano de versão anterior (sem runId) é registrado no ledger em 
 });
 
 test('plano detecta o agente pelo que está instalado quando não há flag', () => {
-  // este root tem só .claude/skills → default claude gera o sh
+  // este root tem .claude/skills E .agents/skills (codex) → claude tem precedência
   const { code, out } = cli('plano', 'pagamentos');
   assert.equal(code, 0, out);
   assert.match(out, /plano de execução \(claude\)/);
+});
+
+test('motor embarcado do codex detecta codex pelo PRÓPRIO marcador (mesmo com .claude no projeto)', () => {
+  const embarcado = path.join(root, '.agents', 'skills', 'onp-spec-driven', 'scripts', 'onp-spec.mjs');
+  const proc = spawnSync('node', [embarcado, 'plano', 'pagamentos'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(proc.status, 0, `${proc.stdout}\n${proc.stderr}`);
+  assert.match(proc.stdout, /plano de execução \(codex\)/);
+});
+
+test('sem .claude, a detecção usa o marcador da skill instalada em .agents (codex)', () => {
+  rmSync(path.join(root, '.claude'), { recursive: true, force: true });
+  const { code, out } = cli('plano', 'pagamentos');
+  assert.equal(code, 0, out);
+  assert.match(out, /plano de execução \(codex\)/);
 });

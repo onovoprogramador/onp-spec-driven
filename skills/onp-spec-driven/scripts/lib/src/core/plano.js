@@ -16,12 +16,24 @@
 //                 com --model e --effort por tarefa, e o resumo geral de
 //                 andamento a cada 1 min no terminal) + plano-execucao.html
 //                 (visual, somente leitura)
+//   codex       → mesmos artefatos do claude, mas o executor roda
+//                 `codex exec` headless (--json, --sandbox, --model e
+//                 model_reasoning_effort por tarefa) — nunca depende do CLI
+//                 do Claude
 //   antigravity → plano-execucao.md com comandos de worktree e um PROMPT
 //                 pronto por faixa, para os agentes paralelos nativos do
-//                 Antigravity (nunca depende do CLI do Claude)
+//                 Antigravity (nunca depende de CLI nenhum)
 
 import path from 'path';
 import { foldStatus } from '../util/text.js';
+
+export const AGENTES = ['claude', 'antigravity', 'codex'];
+
+// agentes cujo plano gera executar-tarefas.sh + plano-execucao.html (CLI
+// headless próprio); o antigravity executa com os agentes nativos dele
+export function usaExecutorSh(agent) {
+  return agent === 'claude' || agent === 'codex';
+}
 
 // esforço aceito em PT ou EN → nível do CLI (`claude --effort <nível>`)
 export const ESFORCO_CLI = {
@@ -42,6 +54,24 @@ export function normalizarEsforco(raw) {
   return ESFORCO_CLI[foldStatus(String(raw)).replace(/[\s_-]/g, '')] || null;
 }
 
+// defaults do codex quando a config ainda traz um modelo claude-* (a config
+// tem defaults do claude; um modelo do outro CLI quebraria o codex exec)
+const MODELO_CODEX = 'gpt-5.6-terra';
+const RESUMO_MODEL_CODEX = 'gpt-5.6-luna';
+const ehModeloClaude = (m) => /^claude-/.test(String(m || ''));
+
+// o codex não tem nível "max" — o teto do model_reasoning_effort é xhigh
+export function esforcoParaAgente(esforcoCli, agent) {
+  if (agent === 'codex' && esforcoCli === 'max') return 'xhigh';
+  return esforcoCli;
+}
+
+export function resumoModelParaAgente(cfg, agent) {
+  const m = cfg.resumoModel || 'claude-haiku-4-5';
+  if (agent === 'codex' && ehModeloClaude(m)) return RESUMO_MODEL_CODEX;
+  return m;
+}
+
 function intersecta(setA, arrB) {
   return arrB.some((f) => setA.has(f));
 }
@@ -53,7 +83,7 @@ function normFile(f) {
 // ── cálculo ────────────────────────────────────────────────────────────────
 
 export function montarPlano(project, featureName, opts = {}) {
-  const agent = opts.agent === 'antigravity' ? 'antigravity' : 'claude';
+  const agent = AGENTES.includes(opts.agent) ? opts.agent : 'claude';
   const feature = project.features.find((f) => f.name === featureName);
   if (!feature) return { erro: `feature "${featureName}" não encontrada em ${project.config.specDir}/features/` };
   if (!feature.tasks || !feature.tasks.tasks.length) {
@@ -85,11 +115,16 @@ export function montarPlano(project, featureName, opts = {}) {
     if (!esforcoCli) {
       avisos.push(`${t.id}: esforço "${esforcoRaw}" desconhecido — usando "medium" (aceitos: baixo|medio|alto|xalto|max)`);
     }
+    let model = t.model || cfg.model;
+    if (agent === 'codex' && ehModeloClaude(model)) {
+      if (t.model) avisos.push(`${t.id}: modelo "${model}" é do Claude — no codex vai rodar com "${MODELO_CODEX}"`);
+      model = MODELO_CODEX;
+    }
     pendentes.push({
       ...t,
       files: t.files.map(normFile),
-      model: t.model || cfg.model,
-      esforcoCli: esforcoCli || 'medium',
+      model,
+      esforcoCli: esforcoParaAgente(esforcoCli || 'medium', agent),
       acs: t.refs.filter((r) => r.startsWith('AC-')),
     });
   }
@@ -418,20 +453,25 @@ export function renderPlanoMd(plan) {
   L.push('');
   L.push('## Como executar');
   L.push('');
-  if (plan.agent === 'claude') {
-    L.push('### ▶ Execução — Claude Code headless');
+  if (usaExecutorSh(plan.agent)) {
+    const codex = plan.agent === 'codex';
+    const cliTarefa = codex ? '`codex exec`' : '`claude -p`';
+    const ajustes = codex
+      ? `\`--model\` e \`model_reasoning_effort\` já definidos por tarefa e sandbox \`${plan.cfg.sandbox}\``
+      : `\`--model\` e \`--effort\` já definidos por tarefa e permissões \`${plan.cfg.permissionMode}\``;
+    L.push(codex ? '### ▶ Execução — Codex headless (codex exec)' : '### ▶ Execução — Claude Code headless');
     L.push('');
     L.push('```bash');
     L.push(`bash ${plan.baseDir}/executar-tarefas.sh`);
     L.push('```');
     L.push('');
     if (sequencial) {
-      L.push('Cada tarefa roda `claude -p` com **janela de contexto limpa**, na árvore principal,');
-      L.push('uma após a outra, com `--model` e `--effort` já definidos por tarefa e permissões');
-      L.push(`\`${plan.cfg.permissionMode}\`. Os prompts exatos estão embutidos no script.`);
+      L.push(`Cada tarefa roda ${cliTarefa} com **janela de contexto limpa**, na árvore principal,`);
+      L.push(`uma após a outra, com ${ajustes}.`);
+      L.push('Os prompts exatos estão embutidos no script.');
     } else {
-      L.push('Cada faixa roda `claude -p` com **janela de contexto limpa**, `--model` e `--effort` já');
-      L.push(`definidos por tarefa, permissões \`${plan.cfg.permissionMode}\`. Os prompts exatos estão`);
+      L.push(`Cada faixa roda ${cliTarefa} com **janela de contexto limpa**, no seu worktree, com`);
+      L.push(`${ajustes}. Os prompts exatos estão`);
       L.push('embutidos no script — quer rodar uma faixa na mão, é só copiá-los de lá.');
     }
     L.push(`Logs: \`../onp-worktrees/${plan.repoName}-${plan.feature}-logs/\`.`);
@@ -566,7 +606,7 @@ export function renderPlanoMd(plan) {
   L.push('');
   return `${L.join('\n')}\n`;
 }
-// ── artefato: executar-tarefas.sh (só claude) ──────────────────────────────
+// ── artefato: executar-tarefas.sh (claude e codex) ─────────────────────────
 //
 // O script é um DISPATCHER, não um roteiro linear: cada faixa e cada tarefa
 // sequencial viram funções, então dá para reexecutar só o que falhou.
@@ -577,9 +617,12 @@ export function renderPlanoMd(plan) {
 //   bash executar-tarefas.sh --gate           → só verify + audit
 //   bash executar-tarefas.sh --listar         → o que existe para executar
 //
-// Cada tarefa roda `claude -p --output-format stream-json`: o NDJSON cru vai
-// para o stream da tarefa no ledger global (ferramentas, raciocínio,
-// saídas, custo) — é de lá que o resumo tira a "última ação".
+// Cada tarefa roda o CLI headless do agente com saída em JSONL:
+//   claude → `claude -p --output-format stream-json --verbose`
+//   codex  → `codex exec --json` (sandbox + --add-dir para o .git
+//            compartilhado dos worktrees)
+// O JSONL cru vai para o stream da tarefa no ledger global (ferramentas,
+// raciocínio, saídas, custo) — é de lá que o resumo tira a "última ação".
 
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -613,15 +656,21 @@ export function renderPlanoSh(plan) {
   P('set -u');
   P('set -o pipefail');
   P('');
+  const codex = plan.agent === 'codex';
   P(`RUN_ID=${shq(plan.runId)}`);
   P(`FEATURE=${shq(plan.feature)}`);
   P(`BASE_BRANCH=${shq(plan.branchTrabalho)}`);
   P(`ENGINE=${shq(plan.engine)}`);
-  P(`CLAUDE_FLAGS=(--permission-mode ${plan.cfg.permissionMode} --allowedTools ${shq(allowedTools(plan))})`);
-  P('STREAM_FLAGS=(--output-format stream-json --verbose)');
+  if (codex) {
+    P(`CODEX_FLAGS=(--sandbox ${shq(plan.cfg.sandbox || 'workspace-write')})`);
+    P('STREAM_FLAGS=(--json)');
+  } else {
+    P(`CLAUDE_FLAGS=(--permission-mode ${plan.cfg.permissionMode} --allowedTools ${shq(allowedTools(plan))})`);
+    P('STREAM_FLAGS=(--output-format stream-json --verbose)');
+  }
   P('FALHAS=""');
   P('COM_GATE=1');
-  P(`RESUMO_MODEL=${shq(plan.cfg.resumoModel || 'claude-haiku-4-5')}`);
+  P(`RESUMO_MODEL=${shq(resumoModelParaAgente(plan.cfg, plan.agent))}`);
   P('RESUMO_PID=""');
   P('');
   P(`verde()    { printf '\\033[32m%s\\033[0m\\n' "$*"; }`);
@@ -638,7 +687,11 @@ export function renderPlanoSh(plan) {
   P('preparar_ambiente() {');
   P('  command -v git >/dev/null 2>&1 || falhar "git não encontrado"');
   P('  command -v node >/dev/null 2>&1 || falhar "node não encontrado"');
-  P('  command -v claude >/dev/null 2>&1 || falhar "Claude Code CLI (claude) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
+  if (codex) {
+    P('  command -v codex >/dev/null 2>&1 || falhar "Codex CLI (codex) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
+  } else {
+    P('  command -v claude >/dev/null 2>&1 || falhar "Claude Code CLI (claude) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
+  }
   P('  TOPLEVEL=$(git rev-parse --show-toplevel 2>/dev/null) || falhar "fora de um repositório git"');
   P('  cd "$TOPLEVEL" || exit 1');
   P('  # artefatos recém-gerados pelo `onp-spec plano` são sujeira esperada:');
@@ -686,14 +739,21 @@ export function renderPlanoSh(plan) {
   P('  printf "%s" "$n"');
   P('}');
   P('');
-  P('# uma tarefa = uma sessão claude headless com contexto limpo.');
-  P('# o NDJSON do stream-json vira o stream da tarefa no ledger');
+  P(`# uma tarefa = uma sessão ${codex ? 'codex exec' : 'claude'} headless com contexto limpo.`);
+  P('# o JSONL da sessão vira o stream da tarefa no ledger');
   P('rodar_tarefa() { # $1=escopo(faixa|seq) $2=T-xxx $3=prompt $4=modelo $5=esforço');
   P('  local chave="$1--$2"');
   P('  local stream="$STREAMS_DIR/$chave.jsonl"');
   P('  evento --tipo tarefa --tarefa "$2" --faixa "$1" --estado executando --stream "$chave"');
-  P('  info "$2 — claude -p ($4 · $5) · stream: $chave"');
-  P('  if claude -p "$3" --model "$4" --effort "$5" "${STREAM_FLAGS[@]}" "${CLAUDE_FLAGS[@]}" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
+  if (codex) {
+    P('  info "$2 — codex exec ($4 · $5) · stream: $chave"');
+    P('  # --add-dir: o .git compartilhado dos worktrees mora no repo principal —');
+    P('  # sem ele o sandbox workspace-write bloquearia o commit da tarefa');
+    P('  if codex exec "$3" --model "$4" -c model_reasoning_effort="$5" "${STREAM_FLAGS[@]}" "${CODEX_FLAGS[@]}" --add-dir "$TOPLEVEL" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
+  } else {
+    P('  info "$2 — claude -p ($4 · $5) · stream: $chave"');
+    P('  if claude -p "$3" --model "$4" --effort "$5" "${STREAM_FLAGS[@]}" "${CLAUDE_FLAGS[@]}" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
+  }
   P('    evento --tipo tarefa --tarefa "$2" --faixa "$1" --estado concluida --stream "$chave"');
   P('    node "$ENGINE" stream-resumo "$RUN_ID" "$chave" 2>/dev/null || true');
   P('    return 0');
@@ -729,17 +789,21 @@ export function renderPlanoSh(plan) {
   P('}');
   P('');
   P('# ── resumo geral de andamento: 1/min enquanto a execução roda ─────────');
-  P('# escrito por IA (claude -p, sem ferramentas) com fallback do motor; vai');
+  P(`# escrito por IA (${codex ? 'codex exec somente leitura' : 'claude -p, sem ferramentas'}) com fallback do motor; vai`);
   P('# para o terminal e para o ledger — o agente repassa o texto no chat.');
   P('gerar_resumo() {');
   P('  local ctx ia');
   P('  ctx=$(node "$ENGINE" resumo "$FEATURE" --contexto 2>/dev/null) || ctx=""');
   P('  [ -n "$ctx" ] || return 0');
-  P('  ia=$(claude -p "Você narra, para o dono do produto, uma execução de tarefas de código em andamento. Estado mecânico:');
+  P(
+    `  ia=$(${codex ? 'codex exec' : 'claude -p'} "Você narra, para o dono do produto, uma execução de tarefas de código em andamento. Estado mecânico:`
+  );
   P('');
   P('$ctx');
   P('');
-  P('Escreva o RESUMO GERAL DE ANDAMENTO: um parágrafo único de 2 a 4 frases, em português simples, dizendo o que está acontecendo agora, o que já terminou, o que falhou e se o usuário precisa agir. Sem markdown, sem listas." --model "$RESUMO_MODEL" 2>/dev/null)');
+  P(
+    `Escreva o RESUMO GERAL DE ANDAMENTO: um parágrafo único de 2 a 4 frases, em português simples, dizendo o que está acontecendo agora, o que já terminou, o que falhou e se o usuário precisa agir. Sem markdown, sem listas." --model "$RESUMO_MODEL"${codex ? ' --sandbox read-only --ephemeral' : ''} 2>/dev/null)`
+  );
   P('  if [ -n "$ia" ]; then');
   P('    node "$ENGINE" resumo "$FEATURE" --gravar --origem ia --texto "$ia" >/dev/null 2>&1 || true');
   P(`    printf '\\n📣 resumo (IA): %s\\n' "$ia"`);
@@ -947,6 +1011,9 @@ export function renderPlanoHtml(plan) {
   const cmd = `bash ${plan.baseDir}/executar-tarefas.sh`;
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
   const sequencial = plan.modo === 'sequencial';
+  const codexHtml = plan.agent === 'codex';
+  const agenteRotulo = codexHtml ? 'Codex' : 'Claude Code';
+  const cliRotulo = codexHtml ? '<code>codex exec</code>' : '<code>claude -p</code>';
   const card = (t) => `
         <div class="tarefa">
           <span class="tid">${esc(t.id)}</span>
@@ -1036,12 +1103,12 @@ export function renderPlanoHtml(plan) {
   ${avisosHtml}
   <div class="executor">
     <h2>Como executar — via agente</h2>
-    <p>Peça ao agente (Claude Code) para executar o plano. Ele roda:</p>
+    <p>Peça ao agente (${agenteRotulo}) para executar o plano. Ele roda:</p>
     <div><code id="cmd">${esc(cmd)}</code></div>
     <p class="nota">Este arquivo é só visualização. ${
       sequencial
-        ? 'Cada tarefa roda <code>claude -p</code> na árvore principal, uma após a outra, com contexto limpo e modelo/esforço já definidos.'
-        : 'Cada faixa roda <code>claude -p</code> num worktree próprio, com contexto limpo, modelo e esforço já definidos.'
+        ? `Cada tarefa roda ${cliRotulo} na árvore principal, uma após a outra, com contexto limpo e modelo/esforço já definidos.`
+        : `Cada faixa roda ${cliRotulo} num worktree próprio, com contexto limpo, modelo e esforço já definidos.`
     }
     O gate final (verify + audit) roda sozinho; a execução fica em background e, a cada
     1 minuto, o agente posta no chat a <b>tabela de andamento</b>

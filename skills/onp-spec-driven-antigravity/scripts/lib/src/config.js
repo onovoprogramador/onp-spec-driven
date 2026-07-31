@@ -33,7 +33,13 @@ export const DEFAULT_CONFIG = {
     permissionMode: 'acceptEdits',
     // override da lista --allowedTools (null = derivada do testCommand + git)
     allowedTools: null,
+    // sandbox do codex headless (`codex exec --sandbox`); para liberar rede
+    // e caminhos fora do workspace o usuário pode trocar para
+    // danger-full-access (decisão explícita dele)
+    sandbox: 'workspace-write',
     // modelo que escreve o "resumo geral de andamento" a cada minuto
+    // (default do claude; no codex o plano usa gpt-5.6-luna se este valor
+    // continuar sendo um modelo claude-*)
     resumoModel: 'claude-haiku-4-5',
   },
 };

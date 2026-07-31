@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { ENTRY } from '../tools/build-skill.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity'];
+const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex'];
 
 function walk(dir, base = dir) {
   const out = [];
@@ -62,14 +62,29 @@ for (const skill of SKILLS) {
 }
 
 // A SKILL.md de cada skill declara seu agente (o init usa o marcador para não
-// instalar a skill errada) e ambas mantêm a MESMA versão (política: bump junto).
+// instalar a skill errada) e todas mantêm a MESMA versão (política: bump junto).
 test('SKILL.md: marcador agent correto e versões alinhadas', () => {
   const frontmatter = (skill) =>
     readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf-8').split('---')[1];
   const claude = frontmatter('onp-spec-driven');
   const ag = frontmatter('onp-spec-driven-antigravity');
+  const codex = frontmatter('onp-spec-driven-codex');
   assert.match(claude, /^\s*agent:\s*claude\s*$/m);
   assert.match(ag, /^\s*agent:\s*antigravity\s*$/m);
+  assert.match(codex, /^\s*agent:\s*codex\s*$/m);
   const versao = (fm) => fm.match(/^\s*version:\s*(\S+)/m)?.[1];
-  assert.equal(versao(claude), versao(ag), 'versões das duas skills divergem — bump junto');
+  assert.equal(versao(claude), versao(ag), 'versões das skills divergem — bump junto');
+  assert.equal(versao(claude), versao(codex), 'versões das skills divergem — bump junto');
+});
+
+// As regras anti-fraude do contrato são sagradas: nenhuma skill pode perder
+// "nunca enfraqueça/pule/apague teste" nem a degradação graciosa (PROVA FRACA).
+test('SKILL.md: contrato e degradação graciosa presentes nas três skills', () => {
+  for (const skill of SKILLS) {
+    const conteudo = readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf-8');
+    assert.match(conteudo, /Nunca enfraqueça, pule ou apague um teste/, `${skill}: regra 6 do contrato sumiu`);
+    assert.match(conteudo, /skip\/todo\) não é prova/, `${skill}: "skip não é prova" sumiu`);
+    assert.match(conteudo, /PROVA FRACA \(auditoria manual\)/, `${skill}: degradação graciosa sumiu`);
+    assert.match(conteudo, /audit --ci` sai com código 0/, `${skill}: gate do audit sumiu`);
+  }
 });

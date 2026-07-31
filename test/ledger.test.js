@@ -18,6 +18,7 @@ import {
   chaveStream,
   resumirStream,
   resumoFerramenta,
+  resumoItemCodex,
   lerStream,
   streamsDaExecucao,
 } from '../src/core/ledger.js';
@@ -297,6 +298,74 @@ test('resumirStream é incremental (o painel só pede o que falta)', () => {
   const parcial = resumirStream(STREAM_REAL, { desde: 9 });
   assert.deepEqual(parcial.itens.map((i) => i.tipo), ['texto', 'fim']);
   assert.equal(parcial.total, 11);
+});
+
+// shapes do `codex exec --json` conforme a documentação oficial (JSON Lines:
+// thread.started, turn.*, item.* — itens agent_message, reasoning,
+// command_execution, file_change, mcp_tool_call, web_search, todo_list)
+const STREAM_CODEX = [
+  '{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}',
+  '{"type":"turn.started"}',
+  '{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}',
+  '{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"bash -lc ls","aggregated_output":"src\\ntest\\n","exit_code":0,"status":"completed"}}',
+  '{"type":"item.completed","item":{"id":"item_1","type":"reasoning","text":"Preciso ler a spec antes."}}',
+  '{"type":"item.completed","item":{"id":"item_2","type":"file_change","status":"completed","changes":[{"path":"/tmp/x/src/a.js","kind":"update"}]}}',
+  '{"type":"item.completed","item":{"id":"item_3","type":"todo_list","items":[{"text":"ler spec","completed":true},{"text":"implementar","completed":false}]}}',
+  '{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Tarefa concluída e commitada."}}',
+  '{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122}}',
+].join('\n');
+
+test('resumirStream entende o JSONL do codex exec --json (paridade com o claude)', () => {
+  const { itens, total, resumo } = resumirStream(STREAM_CODEX);
+  assert.equal(total, 9);
+  const tipos = itens.map((i) => i.tipo);
+  assert.deepEqual(tipos, ['inicio', 'ferramenta', 'saida', 'pensando', 'ferramenta', 'ferramenta', 'texto', 'fim']);
+
+  assert.equal(itens[0].sessao, '0199a213');
+  assert.equal(itens[1].nome, 'Bash');
+  assert.match(itens[1].resumo, /bash -lc ls/);
+  assert.equal(itens[2].erro, false, 'exit_code 0 não é erro');
+  assert.match(itens[2].texto, /src/);
+  assert.match(itens[3].texto, /ler a spec/);
+  assert.equal(itens[4].nome, 'Edição');
+  assert.match(itens[4].resumo, /update .*src\/a\.js/);
+  assert.equal(itens[5].nome, 'Plano');
+  assert.equal(itens[5].resumo, '2 item(ns)');
+  assert.equal(itens[6].texto, 'Tarefa concluída e commitada.');
+  assert.equal(resumo.status, 'sucesso');
+  assert.equal(resumo.turnos, 1);
+  assert.equal(resumo.tokensSaida, 122);
+  assert.equal(resumo.tokensEntrada, 24763);
+});
+
+test('resumirStream (codex): comando com exit != 0 e turn.failed viram erro', () => {
+  const { itens, resumo } = resumirStream(
+    [
+      '{"type":"thread.started","thread_id":"abc"}',
+      '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"node --test","aggregated_output":"1 test failed","exit_code":1,"status":"failed"}}',
+      '{"type":"turn.failed","error":{"message":"task aborted"}}',
+    ].join('\n')
+  );
+  const saida = itens.find((i) => i.tipo === 'saida');
+  assert.equal(saida.erro, true);
+  assert.match(saida.texto, /failed/);
+  assert.equal(resumo.status, 'erro');
+  const fim = itens.find((i) => i.tipo === 'fim');
+  assert.match(fim.texto, /task aborted/);
+});
+
+test('resumoItemCodex resume itens de ferramenta do codex em uma linha', () => {
+  assert.deepEqual(resumoItemCodex({ type: 'command_execution', command: 'npm test' }), {
+    nome: 'Bash',
+    resumo: 'npm test',
+  });
+  assert.match(
+    resumoItemCodex({ type: 'file_change', changes: [{ path: '/a/b/c/d.js', kind: 'add' }] }).resumo,
+    /add b\/c\/d\.js/
+  );
+  assert.equal(resumoItemCodex({ type: 'mcp_tool_call', server: 'db', tool: 'query' }).nome, 'db.query');
+  assert.equal(resumoItemCodex({ type: 'web_search', query: 'node test runner' }).resumo, 'node test runner');
+  assert.equal(resumoItemCodex({ type: 'agent_message', text: 'oi' }), null, 'mensagem não é ferramenta');
 });
 
 test('resumirStream aguenta linha não-JSON (stderr vazado no arquivo)', () => {

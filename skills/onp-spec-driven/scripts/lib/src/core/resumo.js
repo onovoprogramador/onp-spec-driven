@@ -2,8 +2,9 @@
 // executor imprime no terminal a cada ~1 minuto durante a execução.
 //
 // Duas origens, sempre rotuladas:
-//   'ia'    — escrito por um modelo (o executor headless chama `claude -p`;
-//             no Antigravity é o próprio agente que escreve) e gravado com
+//   'ia'    — escrito por um modelo (o executor headless chama `claude -p`
+//             ou `codex exec`; no Antigravity é o próprio agente que
+//             escreve) e gravado com
 //             `onp-spec resumo <feature> --gravar --texto "..."`
 //   'motor' — determinístico, montado da árvore do ledger. É o fallback
 //             sempre disponível: zero dependências, zero rede, zero modelo.
@@ -13,7 +14,7 @@
 // "executando" seria mentira.
 
 import { openSync, closeSync, readSync, statSync, existsSync } from 'fs';
-import { registrarEvento, caminhoStream, resumoFerramenta } from './ledger.js';
+import { registrarEvento, caminhoStream, resumoFerramenta, resumoItemCodex } from './ledger.js';
 
 export const FRESCOR_IA_MS = 2 * 60 * 1000;
 
@@ -52,6 +53,15 @@ export function ultimaAcao(runId, chave, { maxBytes = 4096 } = {}) {
           const t = String(c.text).trim().split('\n')[0];
           return t.length > 120 ? `${t.slice(0, 120)}…` : t;
         }
+      }
+    }
+    // codex exec --json: item.started mostra o comando ainda em execução
+    if ((e.type === 'item.completed' || e.type === 'item.started') && e.item) {
+      const fer = resumoItemCodex(e.item);
+      if (fer) return fer.resumo ? `${fer.nome}: ${fer.resumo}` : fer.nome;
+      if (e.item.type === 'agent_message' && String(e.item.text || '').trim()) {
+        const t = String(e.item.text).trim().split('\n')[0];
+        return t.length > 120 ? `${t.slice(0, 120)}…` : t;
       }
     }
   }

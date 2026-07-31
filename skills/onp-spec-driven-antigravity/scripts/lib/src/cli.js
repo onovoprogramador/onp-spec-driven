@@ -3,7 +3,15 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, chmodSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { montarPlano, renderPlanoMd, renderPlanoSh, renderPlanoHtml, renderPlanoJson } from './core/plano.js';
+import {
+  montarPlano,
+  renderPlanoMd,
+  renderPlanoSh,
+  renderPlanoHtml,
+  renderPlanoJson,
+  usaExecutorSh,
+  AGENTES,
+} from './core/plano.js';
 import { registrarEvento, podarLedger, lerStream, lerEventos, montarArvore } from './core/ledger.js';
 import {
   resumoDeterministico,
@@ -53,8 +61,14 @@ function skillAgentMarker(dir) {
   }
 }
 
+const SKILL_DIR_POR_AGENTE = {
+  claude: 'onp-spec-driven',
+  antigravity: 'onp-spec-driven-antigravity',
+  codex: 'onp-spec-driven-codex',
+};
+
 function resolveSkillDir(agent = 'claude') {
-  const dirName = agent === 'antigravity' ? 'onp-spec-driven-antigravity' : 'onp-spec-driven';
+  const dirName = SKILL_DIR_POR_AGENTE[agent] || 'onp-spec-driven';
   const candidates = [
     path.join(__dirname, '..', 'skills', dirName),
     path.join(__dirname, '..', '..', '..'),
@@ -73,11 +87,11 @@ const HELP = `onp-spec — spec-anchored development (a especificação que cont
 uso: onp-spec <comando> [opções]
 
 comandos:
-  init [--preset base|lgpd-educacao] [--agents claude|antigravity]
+  init [--preset base|lgpd-educacao] [--agents claude|antigravity|codex]
                       cria .spec/, constituição e config no diretório atual
                       (--agents também instala a skill do agente escolhido)
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
-  plano <feature> [--agents claude|antigravity] [--paralelizar T-xxx,T-yyy]
+  plano <feature> [--agents claude|antigravity|codex] [--paralelizar T-xxx,T-yyy]
                   [--sequencial]
                       plano de execução. Default: agrupa tarefas em faixas
                       PARALELAS (arquivos disjuntos → 1 worktree + 1 branch +
@@ -92,8 +106,11 @@ comandos:
                       · claude: executar-tarefas.sh (claude -p headless com
                         --model/--effort por tarefa e resumo de andamento a
                         cada 1 min no terminal) + plano-execucao.html (visual)
+                      · codex: executar-tarefas.sh (codex exec headless com
+                        --json, sandbox e --model/model_reasoning_effort por
+                        tarefa) + plano-execucao.html (visual)
                       · antigravity: prompts prontos p/ os agentes nativos
-                        (não depende do CLI do Claude)
+                        (não depende de CLI nenhum)
   resumo [feature] [--tabela] [--global] [--run <runId>]
          [--gravar [--texto "..."] [--origem ia|motor]]
                       o RESUMO GERAL DE ANDAMENTO em texto: o que está
@@ -201,14 +218,25 @@ function cmdInit(rootDir, flags) {
 
   if (flags.agents !== undefined) {
     const agent = flags.agents === true ? 'claude' : flags.agents;
-    if (agent !== 'claude' && agent !== 'antigravity') {
-      console.error(`--agents desconhecido: "${flags.agents}" (use: claude, antigravity)`);
+    if (!AGENTES.includes(agent)) {
+      console.error(`--agents desconhecido: "${flags.agents}" (use: ${AGENTES.join(', ')})`);
       return 2;
     }
-    const rotulo = agent === 'claude' ? 'Claude Code' : 'Antigravity';
+    const rotulo = { claude: 'Claude Code', antigravity: 'Antigravity', codex: 'Codex' }[agent];
+    // Codex e Antigravity leem o MESMO diretório de skills do projeto
+    // (.agents/skills — o padrão cross-agent que o Codex adota); o marcador
+    // `agent:` no frontmatter diz de quem é a skill instalada.
     const destRel = path.join(agent === 'claude' ? '.claude' : '.agents', 'skills', 'onp-spec-driven');
     const dest = path.join(rootDir, destRel);
     const skillDir = resolveSkillDir(agent);
+    const marcadorExistente = skillAgentMarker(dest);
+    if (marcadorExistente && marcadorExistente !== agent) {
+      console.error(
+        `✘ ${destRel} já contém a skill do agente "${marcadorExistente}" — Codex e Antigravity compartilham esse diretório.\n` +
+          `  Para trocar de agente, remova a pasta antes: rm -rf ${destRel}`
+      );
+      return 2;
+    }
     if (!skillDir) {
       console.log(
         `· skill para ${rotulo} não encontrada junto a este motor — instale com: npx @onovoprogramador/onp-spec init --agents ${agent}`
@@ -287,18 +315,26 @@ function cmdNew(rootDir, name, flags) {
 }
 
 // Detecta para qual agente gerar os artefatos do plano: flag explícita vence;
-// senão, o próprio caminho do motor embarcado denuncia (.claude/ vs .agents/);
-// senão, o que estiver instalado no projeto; default: claude.
+// senão, o marcador `agent:` da própria skill embarcada é a fonte da verdade
+// (Codex e Antigravity compartilham .agents/, então o caminho sozinho não
+// basta); senão, o caminho do motor; senão, o que estiver instalado no
+// projeto; default: claude.
 function detectarAgente(rootDir, flag) {
   if (flag !== undefined && flag !== true) {
-    if (flag !== 'claude' && flag !== 'antigravity') return { erro: `--agents desconhecido: "${flag}" (use: claude, antigravity)` };
+    if (!AGENTES.includes(flag)) return { erro: `--agents desconhecido: "${flag}" (use: ${AGENTES.join(', ')})` };
     return { agent: flag };
   }
+  // motor embarcado: este arquivo mora em <skill>/scripts/lib/src
+  const marcadorProprio = skillAgentMarker(path.join(__dirname, '..', '..', '..'));
+  if (AGENTES.includes(marcadorProprio)) return { agent: marcadorProprio };
   const segmentos = __dirname.split(path.sep);
+  if (segmentos.includes('.codex')) return { agent: 'codex' };
   if (segmentos.includes('.agents')) return { agent: 'antigravity' };
   if (segmentos.includes('.claude')) return { agent: 'claude' };
-  const temAg = existsSync(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
   const temClaude = existsSync(path.join(rootDir, '.claude', 'skills', 'onp-spec-driven'));
+  const marcadorProjeto = skillAgentMarker(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
+  if (AGENTES.includes(marcadorProjeto) && !temClaude) return { agent: marcadorProjeto };
+  const temAg = existsSync(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
   if (temAg && !temClaude) return { agent: 'antigravity' };
   return { agent: 'claude' };
 }
@@ -311,7 +347,7 @@ function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, 
   const planoJson = renderPlanoJson(plan);
   writeFileSync(path.join(dir, 'plano.json'), planoJson);
   const gerados = [`${plan.baseDir}/plano-execucao.md`, `${plan.baseDir}/plano.json`];
-  if (plan.agent === 'claude') {
+  if (usaExecutorSh(plan.agent)) {
     const sh = path.join(dir, 'executar-tarefas.sh');
     writeFileSync(sh, renderPlanoSh(plan));
     chmodSync(sh, 0o755);
@@ -390,7 +426,7 @@ function cmdStreamResumo(positional) {
 function cmdPlano(project, positional, flags) {
   const featureName = positional[0];
   if (!featureName) {
-    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity] [--paralelizar T-xxx,T-yyy] [--sequencial]');
+    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity|codex] [--paralelizar T-xxx,T-yyy] [--sequencial]');
     return 2;
   }
   const det = detectarAgente(project.config.rootDir, flags.agents);
@@ -443,13 +479,13 @@ function cmdPlano(project, positional, flags) {
   }
   console.log('\nonde está cada coisa:');
   console.log(`  · plano (leia primeiro): ${plan.gerados[0]}`);
-  if (plan.agent === 'claude') {
+  if (usaExecutorSh(plan.agent)) {
     console.log(`  · executor headless:     ${plan.baseDir}/executar-tarefas.sh`);
     console.log(`  · visual (leitura):      ${plan.baseDir}/plano-execucao.html`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
   console.log('\npróximo passo:');
-  if (plan.agent === 'claude') {
+  if (usaExecutorSh(plan.agent)) {
     console.log(`  · executar: bash ${plan.baseDir}/executar-tarefas.sh`);
     console.log('    (enquanto roda, o resumo geral de andamento sai a cada 1 min — repasse ao usuário)');
   } else {

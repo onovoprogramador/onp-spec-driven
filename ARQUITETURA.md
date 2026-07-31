@@ -34,13 +34,18 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 
 - Node.js >= 18, ESM puro, **zero dependências**.
 - Testes da própria lib: `node:test` nativo.
-- **A skill é o artefato principal** (`skills/onp-spec-driven/`), autossuficiente:
-  - `SKILL.md` + `references/` — contrato do agente (Claude Code/Cursor): fluxo
+- **A skill é o artefato principal**, autossuficiente, em TRÊS variantes com o
+  MESMO motor e a MESMA versão (`skills/onp-spec-driven/` para Claude Code,
+  `skills/onp-spec-driven-codex/` para Codex, `skills/onp-spec-driven-antigravity/`
+  para Antigravity; marcador `agent:` no frontmatter evita instalar a errada):
+  - `SKILL.md` + `references/` — contrato do agente: fluxo
     Especificar → Projetar → Tarefas → Executar → **Auditar**, loop de correção
     limitado a 3 iterações, 1 task = 1 commit, gate com saída colada.
   - `scripts/` — **motor mecânico embarcado** (gerado de `src/` por
     `node tools/build-skill.mjs`; `test/skill-sync.test.js` acusa drift).
-    Instalar = copiar a pasta para `.claude/skills/`. Sem npm, sem npx.
+    Instalar = copiar a pasta para `.claude/skills/` (Claude Code) ou
+    `.agents/skills/` (Codex e Antigravity — compartilham o diretório, por
+    isso o marcador). Sem npm, sem npx.
 - A **CLI npm** (`bin/onp-spec.js` → `src/`) continua existindo como modo CI
   (`@onovoprogramador/onp-spec`); consome o MESMO `src/`.
 - Design da refatoração skill-first: `docs/TDD-skill-harness.md`; achados que a
@@ -198,8 +203,20 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
   default haiku; fallback determinístico) e o grava no ledger — no exit, um
   trap (`pkill -P` no loop, senão o `sleep` órfão segura o stdout de quem
   chamou via pipe) registra o resumo final.
+- **codex**: MESMOS artefatos e MESMO dispatcher do claude, trocando o CLI:
+  cada tarefa roda `codex exec` com `--model` +
+  `-c model_reasoning_effort=<nível>` (o nível `max` do tasks.md vira
+  `xhigh`, teto do Codex), saída `--json` (JSONL → stream da tarefa no
+  ledger), sandbox `paralelo.sandbox` (default `workspace-write`) e
+  `--add-dir <repo>` — o `.git` compartilhado dos worktrees mora no repo
+  principal e sem isso o sandbox bloquearia o commit. O resumo por minuto usa
+  `codex exec --sandbox read-only --ephemeral` com modelo barato
+  (`gpt-5.6-luna` quando `paralelo.resumoModel` ainda é um `claude-*`); o
+  default de modelo por tarefa vira `gpt-5.6-terra` quando `paralelo.model`
+  é um `claude-*` (um `Modelo: claude-*` explícito no tasks.md é trocado com
+  aviso). Nunca depende do CLI do Claude.
 - **antigravity**: o md ganha comandos de worktree e um prompt pronto por
-  faixa para os agentes paralelos nativos — nunca depende do CLI do Claude.
+  faixa para os agentes paralelos nativos — nunca depende de CLI nenhum.
 
 **Paralelizar é escolha do usuário — inclusive QUAIS tarefas**: o agente
 apresenta o plano como recomendação e pergunta antes de executar.
@@ -237,11 +254,15 @@ anterior** (`gateDesatualizado`), então uma execução só aparece "concluída"
 com audit fresco em 0. O `--sem-gate` registra `fim: 1` de propósito — sem
 audit não existe prova.
 
-O stream de cada tarefa é o NDJSON cru de `claude -p --output-format
-stream-json --verbose`, em `~/.onp-spec/painel/streams/<runId>/<faixa>--<T-xxx>.jsonl`.
-`resumirStream()` traduz para uma linha do tempo (`inicio`, `ferramenta`,
-`pensando`, `saida`, `texto`, `fim`) com corte de tamanho e leitura
-incremental por cursor de linhas. Observação honesta: em headless o bloco
+O stream de cada tarefa é o JSONL cru do CLI headless — `claude -p
+--output-format stream-json --verbose` (eventos system/assistant/user/result)
+ou `codex exec --json` (eventos thread.started/turn.*/item.* — itens
+agent_message, reasoning, command_execution, file_change, mcp_tool_call,
+web_search, todo_list) — em
+`~/.onp-spec/painel/streams/<runId>/<faixa>--<T-xxx>.jsonl`.
+`resumirStream()` traduz qualquer um dos dois para a MESMA linha do tempo
+(`inicio`, `ferramenta`, `pensando`, `saida`, `texto`, `fim`) com corte de
+tamanho e leitura incremental por cursor de linhas. Observação honesta: em headless o bloco
 `thinking` costuma vir redigido (vazio + signature); a contagem de
 `system/thinking_tokens` mostra a atividade sem inventar raciocínio.
 
@@ -257,7 +278,7 @@ quebras), com rodapé de faixas falhadas e gate — pronta para o agente colar
 no chat junto com o texto; a execução roda em background e o usuário recebe
 o resumo completo ao final.
 
-Duas origens, sempre rotuladas: `ia` (o executor claude grava via
+Duas origens, sempre rotuladas: `ia` (o executor claude/codex grava via
 `resumo --gravar --origem ia --texto`; no Antigravity é o próprio agente que
 escreve) e `motor` (determinístico: `resumoDeterministico()` narra a árvore
 do ledger — concluídas, tarefa em execução com a última ação do stream via

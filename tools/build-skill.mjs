@@ -10,8 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCRIPTS_CLAUDE = path.join(ROOT, 'skills', 'onp-spec-driven', 'scripts');
-const SCRIPTS_ANTIGRAVITY = path.join(ROOT, 'skills', 'onp-spec-driven-antigravity', 'scripts');
+const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex'];
 export const ENTRY = `#!/usr/bin/env node
 // Entrypoint do motor embarcado da skill onp-spec-driven.
 // Uso (a partir da RAIZ do projeto do usuário):
@@ -43,9 +42,7 @@ export function buildSkillDir(scriptsDir) {
 }
 
 export function buildSkill() {
-  const out1 = buildSkillDir(SCRIPTS_CLAUDE);
-  const out2 = buildSkillDir(SCRIPTS_ANTIGRAVITY);
-  return [out1, out2];
+  return SKILLS.map((skill) => buildSkillDir(path.join(ROOT, 'skills', skill, 'scripts')));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

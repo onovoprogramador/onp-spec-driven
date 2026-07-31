@@ -30,6 +30,19 @@ Pronto: isso cria a estrutura `.spec/` do projeto **e** instala a skill em
 `.claude/skills/onp-spec-driven/`. Abra uma conversa nova no Claude Code e a
 skill já está ativa.
 
+### Codex
+
+Na **raiz do seu projeto**:
+
+```bash
+npx @onovoprogramador/onp-spec init --agents codex
+```
+
+Isso cria a estrutura `.spec/` **e** instala a skill em
+`.agents/skills/onp-spec-driven/` (o diretório de skills que o Codex lê no
+repositório). Abra uma conversa nova: a skill entra sozinha quando o pedido
+casa com ela, ou invoque explicitamente com `$onp-spec-driven`.
+
 ### Antigravity
 
 Na **raiz do seu projeto**:
@@ -53,19 +66,26 @@ git clone --depth 1 https://github.com/onovoprogramador/onp-spec-driven.git /tmp
 mkdir -p .claude/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven .claude/skills/onp-spec-driven
 
+# Codex (neste projeto)
+mkdir -p .agents/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-codex .agents/skills/onp-spec-driven
+
 # Antigravity (neste workspace)
 mkdir -p .agents/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity .agents/skills/onp-spec-driven
 ```
 
 Quer a skill disponível em **todos** os seus projetos? Copie para o diretório
-global do agente em vez do projeto: `~/.claude/skills/` (Claude Code) ou
-`~/.gemini/config/skills/` (Antigravity).
+global do agente em vez do projeto: `~/.claude/skills/` (Claude Code),
+`~/.agents/skills/` (Codex) ou `~/.gemini/config/skills/` (Antigravity).
 
 > **Importante:** cada agente tem a SUA skill — a do Claude Code executa o
-> plano com sessões headless paralelas do próprio Claude; a do Antigravity usa
-> os agentes paralelos nativos dele. Não misture as pastas (a skill sabe se
-> defender, mas por que arriscar?).
+> plano com sessões headless paralelas do próprio Claude; a do Codex, com
+> sessões headless `codex exec`; a do Antigravity usa os agentes paralelos
+> nativos dele. **Codex e Antigravity leem o mesmo diretório**
+> (`.agents/skills/`), então instale ali a skill do agente que você usa neste
+> projeto — o `init` se recusa a sobrescrever a skill de um agente pela do
+> outro (a skill sabe se defender, mas por que arriscar?).
 
 ## Como usar — você fala, o agente prova
 

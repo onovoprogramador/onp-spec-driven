@@ -1,6 +1,6 @@
 {
   "name": "@onovoprogramador/onp-spec",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "publishConfig": {
     "access": "public"
   },
@@ -33,7 +33,8 @@
     "rastreabilidade",
     "lgpd",
     "ai-coding",
-    "claude-code"
+    "claude-code",
+    "codex"
   ],
   "author": "Vitor Manoel — O Novo Programador",
   "license": "MIT"
