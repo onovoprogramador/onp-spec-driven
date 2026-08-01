@@ -1,6 +1,6 @@
-// Garante que o motor embarcado em CADA skill (claude e antigravity) está
-// sincronizado com src/ e templates/ — mata o drift silencioso (SK-5).
-// Se este teste falhar: node tools/build-skill.mjs
+// Garante que o motor embarcado em CADA skill (claude, antigravity, codex e
+// cursor) está sincronizado com src/ e templates/ — mata o drift silencioso
+// (SK-5). Se este teste falhar: node tools/build-skill.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { ENTRY } from '../tools/build-skill.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex'];
+const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex', 'onp-spec-driven-cursor'];
 
 function walk(dir, base = dir) {
   const out = [];
@@ -69,17 +69,31 @@ test('SKILL.md: marcador agent correto e versões alinhadas', () => {
   const claude = frontmatter('onp-spec-driven');
   const ag = frontmatter('onp-spec-driven-antigravity');
   const codex = frontmatter('onp-spec-driven-codex');
+  const cursor = frontmatter('onp-spec-driven-cursor');
   assert.match(claude, /^\s*agent:\s*claude\s*$/m);
   assert.match(ag, /^\s*agent:\s*antigravity\s*$/m);
   assert.match(codex, /^\s*agent:\s*codex\s*$/m);
+  assert.match(cursor, /^\s*agent:\s*cursor\s*$/m);
   const versao = (fm) => fm.match(/^\s*version:\s*(\S+)/m)?.[1];
   assert.equal(versao(claude), versao(ag), 'versões das skills divergem — bump junto');
   assert.equal(versao(claude), versao(codex), 'versões das skills divergem — bump junto');
+  assert.equal(versao(claude), versao(cursor), 'versões das skills divergem — bump junto');
+});
+
+// O Cursor exige que o `name:` do frontmatter seja IGUAL ao nome da pasta
+// instalada (.cursor/skills/onp-spec-driven) — senão a skill não carrega.
+test('SKILL.md (cursor): name compatível com a pasta de instalação', () => {
+  const frontmatter = readFileSync(
+    path.join(ROOT, 'skills', 'onp-spec-driven-cursor', 'SKILL.md'),
+    'utf-8'
+  ).split('---')[1];
+  assert.match(frontmatter, /^\s*name:\s*onp-spec-driven\s*$/m);
+  assert.match(frontmatter, /^\s*description:\s*\S/m, 'description é obrigatória para a ativação automática');
 });
 
 // As regras anti-fraude do contrato são sagradas: nenhuma skill pode perder
 // "nunca enfraqueça/pule/apague teste" nem a degradação graciosa (PROVA FRACA).
-test('SKILL.md: contrato e degradação graciosa presentes nas três skills', () => {
+test('SKILL.md: contrato e degradação graciosa presentes nas quatro skills', () => {
   for (const skill of SKILLS) {
     const conteudo = readFileSync(path.join(ROOT, 'skills', skill, 'SKILL.md'), 'utf-8');
     assert.match(conteudo, /Nunca enfraqueça, pule ou apague um teste/, `${skill}: regra 6 do contrato sumiu`);
@@ -99,4 +113,22 @@ test('SKILL.md (codex): gate de confirmação de modelos e esforços presente', 
   assert.match(conteudo, /Nunca\s+aumente modelo\/esforço sem o usuário pedir/);
   assert.match(conteudo, /--modelo gpt-5\.6-luna --esforco baixo/);
   assert.match(conteudo, /onp-spec tarefa <feature> <T-xxx> --modelo/);
+});
+
+// No cursor, idem: modelos claude-*/gpt-* são cobrados por uso no plano do
+// usuário — o gate de confirmação de modelos é sagrado, e a skill precisa
+// ser honesta sobre o esforço (não existe flag no CLI; vai no slug).
+test('SKILL.md (cursor): gate de confirmação de modelos e honestidade do esforço', () => {
+  const conteudo = readFileSync(path.join(ROOT, 'skills', 'onp-spec-driven-cursor', 'SKILL.md'), 'utf-8');
+  assert.match(conteudo, /O MODELO de cada tarefa é escolha do USUÁRIO — confirme ANTES de\s+executar/);
+  assert.match(conteudo, /Sem essa confirmação, não execute/);
+  assert.match(conteudo, /Nunca troque um modelo por um\s+mais caro sem o usuário pedir/);
+  assert.match(conteudo, /--modelo composer/);
+  assert.match(conteudo, /onp-spec tarefa <feature> <T-xxx> --modelo/);
+  // honestidade: o CLI do Cursor não tem flag de esforço — o slug decide
+  assert.match(conteudo, /o CLI do Cursor não tem flag de esforço/);
+  assert.match(conteudo, /gpt-5\.6-terra-high/);
+  // e o executor depende do --force (sem ele o modo print não escreve)
+  assert.match(conteudo, /--force/);
+  assert.match(conteudo, /\.cursor\/cli\.json/);
 });

@@ -34,16 +34,19 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 
 - Node.js >= 18, ESM puro, **zero dependências**.
 - Testes da própria lib: `node:test` nativo.
-- **A skill é o artefato principal**, autossuficiente, em TRÊS variantes com o
-  MESMO motor e a MESMA versão (`skills/onp-spec-driven/` para Claude Code,
-  `skills/onp-spec-driven-codex/` para Codex, `skills/onp-spec-driven-antigravity/`
-  para Antigravity; marcador `agent:` no frontmatter evita instalar a errada):
+- **A skill é o artefato principal**, autossuficiente, em QUATRO variantes com
+  o MESMO motor e a MESMA versão (`skills/onp-spec-driven/` para Claude Code,
+  `skills/onp-spec-driven-codex/` para Codex, `skills/onp-spec-driven-cursor/`
+  para Cursor, `skills/onp-spec-driven-antigravity/` para Antigravity;
+  marcador `agent:` no frontmatter evita instalar a errada):
   - `SKILL.md` + `references/` — contrato do agente: fluxo
     Especificar → Projetar → Tarefas → Executar → **Auditar**, loop de correção
     limitado a 3 iterações, 1 task = 1 commit, gate com saída colada.
   - `scripts/` — **motor mecânico embarcado** (gerado de `src/` por
     `node tools/build-skill.mjs`; `test/skill-sync.test.js` acusa drift).
-    Instalar = copiar a pasta para `.claude/skills/` (Claude Code) ou
+    Instalar = copiar a pasta para `.claude/skills/` (Claude Code),
+    `.cursor/skills/` (Cursor — Agent Skills nativas desde o Cursor 2.4; o
+    `name:` do frontmatter TEM que ser igual ao nome da pasta) ou
     `.agents/skills/` (Codex e Antigravity — compartilham o diretório, por
     isso o marcador). Sem npm, sem npx.
 - A **CLI npm** (`bin/onp-spec.js` → `src/`) continua existindo como modo CI
@@ -180,7 +183,11 @@ default 3) divide as faixas em ondas. `Modelo:`/`Esforço:` por tarefa (ou
 defaults `paralelo.model`/`paralelo.esforco`) alimentam o executor.
 
 O cálculo é agnóstico de agente; os artefatos variam (`--agents`, com
-auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
+auto-detecção: 1º o marcador `agent:` da própria skill embarcada, 2º o
+caminho do motor (`.codex`/`.cursor/skills`/`.agents`/`.claude` — um
+checkout em `~/.cursor/worktrees/<repo>` NÃO conta como cursor), 3º a skill
+instalada no projeto com precedência `.claude` → `.agents` → `.cursor`;
+com mais de uma skill instalada, vale essa ordem — na dúvida, use a flag):
 
 - **sempre**: `plano-execucao.md` — faixas/ondas, gestão de branches e
   commits (1 tarefa = 1 commit `T-xxx <feature>: título`; merge `--no-ff` na
@@ -224,6 +231,23 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
   `onp-spec tarefa <feature> <T-xxx> [status] [--modelo <m>] [--esforco <n>]`
   grava `- Modelo:`/`- Esforço:` na seção da tarefa no tasks.md (substitui se
   existir, insere se não) para ajuste por tarefa.
+- **cursor**: MESMOS artefatos e MESMO dispatcher do claude, trocando o CLI:
+  cada tarefa roda o CLI do Cursor (`agent -p`, com fallback para o nome
+  legado `cursor-agent`) com `--model` por tarefa, saída
+  `--output-format stream-json` (NDJSON → stream da tarefa no ledger) e
+  `--force` — sem `--force` o modo print do Cursor não modifica arquivos; o
+  controle fino é do usuário via `permissions.deny` em `.cursor/cli.json`,
+  que vence o `--force`. **Não existe flag de esforço no CLI do Cursor**: o
+  nível vai embutido no slug do modelo (ex.: `gpt-5.6-terra-high`), então o
+  `Esforço:` do tasks.md é informativo nesse plano (o artefato avisa).
+  Modelos `claude-*` são slugs VÁLIDOS no Cursor — nada é trocado; só o
+  modelo do resumo por minuto vira `composer` (modelo da casa, uso incluído)
+  enquanto `paralelo.resumoModel` for o default `claude-haiku-4-5`. O resumo
+  por minuto roda `agent -p` SEM `--force` (somente leitura por construção).
+  O plano imprime "modelos deste plano" e a skill obriga o agente a
+  CONFIRMAR com o usuário antes de executar (claude-*/gpt-* são cobrados por
+  uso no plano do Cursor; a rota de economia é `--modelo composer`). Nunca
+  depende do CLI do Claude nem do Codex.
 - **antigravity**: o md ganha comandos de worktree e um prompt pronto por
   faixa para os agentes paralelos nativos — nunca depende de CLI nenhum.
 
@@ -264,12 +288,15 @@ com audit fresco em 0. O `--sem-gate` registra `fim: 1` de propósito — sem
 audit não existe prova.
 
 O stream de cada tarefa é o JSONL cru do CLI headless — `claude -p
---output-format stream-json --verbose` (eventos system/assistant/user/result)
-ou `codex exec --json` (eventos thread.started/turn.*/item.* — itens
+--output-format stream-json --verbose` (eventos system/assistant/user/result),
+`codex exec --json` (eventos thread.started/turn.*/item.* — itens
 agent_message, reasoning, command_execution, file_change, mcp_tool_call,
-web_search, todo_list) — em
+web_search, todo_list) ou o CLI do Cursor `agent -p --output-format
+stream-json` (system/init, assistant e result no MESMO shape do claude;
+ferramentas como eventos tool_call started/completed com corpo em
+`tool_call.<nome>ToolCall`, sem usage nem thinking em modo print) — em
 `~/.onp-spec/painel/streams/<runId>/<faixa>--<T-xxx>.jsonl`.
-`resumirStream()` traduz qualquer um dos dois para a MESMA linha do tempo
+`resumirStream()` traduz qualquer um dos três para a MESMA linha do tempo
 (`inicio`, `ferramenta`, `pensando`, `saida`, `texto`, `fim`) com corte de
 tamanho e leitura incremental por cursor de linhas. Observação honesta: em headless o bloco
 `thinking` costuma vir redigido (vazio + signature); a contagem de

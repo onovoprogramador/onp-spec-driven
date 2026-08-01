@@ -19,6 +19,7 @@ import {
   resumirStream,
   resumoFerramenta,
   resumoItemCodex,
+  resumoToolCallCursor,
   lerStream,
   streamsDaExecucao,
 } from '../src/core/ledger.js';
@@ -352,6 +353,85 @@ test('resumirStream (codex): comando com exit != 0 e turn.failed viram erro', ()
   assert.equal(resumo.status, 'erro');
   const fim = itens.find((i) => i.tipo === 'fim');
   assert.match(fim.texto, /task aborted/);
+});
+
+// shapes do CLI do Cursor (`agent -p --output-format stream-json`) conforme a
+// documentação oficial (cursor.com/docs/cli/reference/output-format): NDJSON
+// com system/init, user, assistant e result NO MESMO shape do claude; as
+// ferramentas chegam como eventos tool_call started/completed com o corpo em
+// tool_call.<nome>ToolCall (args e, no completed, result.success/erro).
+const STREAM_CURSOR = [
+  '{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/x","session_id":"9f2b1c4d-0000-0000-0000-000000000000","model":"Claude Sonnet 5","permissionMode":"default"}',
+  '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Execute a tarefa T-001"}]},"session_id":"9f2b1c4d"}',
+  '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"/tmp/x/.spec/features/pagamentos/spec.md"}}},"session_id":"9f2b1c4d"}',
+  '{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"readToolCall":{"args":{"path":"/tmp/x/.spec/features/pagamentos/spec.md"},"result":{"success":{"content":"# Spec...","isEmpty":false,"totalLines":54,"totalChars":1254}}}},"session_id":"9f2b1c4d"}',
+  '{"type":"tool_call","subtype":"started","call_id":"c2","tool_call":{"shellToolCall":{"args":{"command":"node --test"}}},"session_id":"9f2b1c4d"}',
+  '{"type":"tool_call","subtype":"completed","call_id":"c2","tool_call":{"shellToolCall":{"args":{"command":"node --test"},"result":{"success":{"output":"tests 3 pass 3"}}}},"session_id":"9f2b1c4d"}',
+  '{"type":"tool_call","subtype":"completed","call_id":"c3","tool_call":{"writeToolCall":{"args":{"path":"/tmp/x/src/a.js"},"result":{"success":{"linesCreated":12}}}},"session_id":"9f2b1c4d"}',
+  '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Tarefa concluída e commitada."}]},"session_id":"9f2b1c4d"}',
+  '{"type":"result","subtype":"success","duration_ms":45210,"duration_api_ms":44100,"is_error":false,"result":"Tarefa concluída e commitada.","session_id":"9f2b1c4d","request_id":"req-1"}',
+].join('\n');
+
+test('resumirStream entende o stream-json do CLI do Cursor (paridade com claude e codex)', () => {
+  const { itens, total, resumo } = resumirStream(STREAM_CURSOR);
+  assert.equal(total, 9);
+  const tipos = itens.map((i) => i.tipo);
+  // started não entra (viraria duplicata); completed vira ferramenta (+ saída quando há texto)
+  assert.deepEqual(tipos, ['inicio', 'ferramenta', 'saida', 'ferramenta', 'saida', 'ferramenta', 'texto', 'fim']);
+
+  assert.equal(itens[0].sessao, '9f2b1c4d');
+  assert.equal(itens[0].modelo, 'Claude Sonnet 5');
+  assert.equal(itens[1].nome, 'Read');
+  assert.match(itens[1].resumo, /features\/pagamentos\/spec\.md/);
+  assert.equal(itens[2].erro, false);
+  assert.match(itens[2].texto, /# Spec/);
+  assert.equal(itens[3].nome, 'Bash');
+  assert.match(itens[3].resumo, /node --test/);
+  assert.match(itens[4].texto, /tests 3 pass 3/);
+  assert.equal(itens[5].nome, 'Write');
+  assert.equal(itens[6].texto, 'Tarefa concluída e commitada.');
+  assert.equal(resumo.status, 'sucesso');
+  assert.equal(resumo.duracaoMs, 45210);
+  assert.equal(resumo.custoUsd, null, 'o stream do Cursor não traz usage/custo — nunca inventar');
+});
+
+test('resumirStream (cursor): tool_call com erro e result is_error viram erro', () => {
+  const { itens, resumo } = resumirStream(
+    [
+      '{"type":"system","subtype":"init","session_id":"abc-def","model":"composer","permissionMode":"default"}',
+      '{"type":"tool_call","subtype":"completed","call_id":"c1","tool_call":{"shellToolCall":{"args":{"command":"node --test"},"result":{"error":{"message":"1 test failed"}}}}}',
+      '{"type":"result","subtype":"error","duration_ms":100,"is_error":true,"result":"a tarefa falhou","session_id":"abc-def"}',
+    ].join('\n')
+  );
+  const saida = itens.find((i) => i.tipo === 'saida');
+  assert.equal(saida.erro, true);
+  assert.match(saida.texto, /1 test failed/);
+  assert.equal(resumo.status, 'erro');
+  const fim = itens.find((i) => i.tipo === 'fim');
+  assert.match(fim.texto, /a tarefa falhou/);
+});
+
+test('resumoToolCallCursor resume tool_calls do Cursor em uma linha', () => {
+  const read = resumoToolCallCursor({ readToolCall: { args: { path: '/a/b/c/d.md' } } });
+  assert.equal(read.nome, 'Read');
+  assert.equal(read.resumo, 'b/c/d.md');
+  assert.equal(read.temResultado, false, 'started ainda não tem resultado');
+
+  const shell = resumoToolCallCursor({ shellToolCall: { args: { command: 'npm test' } } });
+  assert.deepEqual([shell.nome, shell.resumo], ['Bash', 'npm test']);
+
+  // grep com pattern E path: o que importa ver é a BUSCA, não o diretório
+  const grep = resumoToolCallCursor({ grepToolCall: { args: { pattern: 'AC-\\d+', path: '/tmp/x/src' } } });
+  assert.deepEqual([grep.nome, grep.resumo], ['Grep', 'AC-\\d+']);
+
+  // ferramenta desconhecida não quebra: nome derivado do próprio corpo
+  const outra = resumoToolCallCursor({ deployToolCall: { args: { target: 'staging' } } });
+  assert.equal(outra.nome, 'Deploy');
+  assert.match(outra.resumo, /target/);
+
+  // shape estranho (sem *ToolCall) é ignorado, nunca explode
+  assert.equal(resumoToolCallCursor({ foo: {} }), null);
+  assert.equal(resumoToolCallCursor(), null);
 });
 
 test('resumoItemCodex resume itens de ferramenta do codex em uma linha', () => {

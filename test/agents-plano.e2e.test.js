@@ -5,7 +5,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'fs';
+import { mkdtempSync, mkdirSync, cpSync, writeFileSync, readFileSync, rmSync, existsSync, statSync } from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
@@ -28,10 +28,14 @@ function cli(...args) {
 }
 
 test('init --agents inválido falha alto (exit 2), nada instalado', () => {
-  const { code, out } = cli('init', '--agents', 'cursor');
+  const { code, out } = cli('init', '--agents', 'copilot');
   assert.equal(code, 2, out);
   assert.match(out, /--agents desconhecido/);
-  assert.ok(!existsSync(path.join(root, '.claude')) && !existsSync(path.join(root, '.agents')));
+  assert.ok(
+    !existsSync(path.join(root, '.claude')) &&
+      !existsSync(path.join(root, '.agents')) &&
+      !existsSync(path.join(root, '.cursor'))
+  );
 });
 
 test('init --agents claude instala a skill do Claude em .claude/skills/', () => {
@@ -92,6 +96,28 @@ test('init --agents codex instala a skill do Codex em .agents/skills/ (o diretó
   // e rodar de novo mantém, sem reclamar
   const denovo = cli('init', '--agents', 'codex');
   assert.equal(denovo.code, 0, denovo.out);
+});
+
+test('init --agents cursor instala a skill do Cursor em .cursor/skills/ (o diretório de skills do Cursor)', () => {
+  const { code, out } = cli('init', '--agents', 'cursor');
+  assert.equal(code, 0, out);
+  const skillMd = path.join(root, '.cursor', 'skills', 'onp-spec-driven', 'SKILL.md');
+  assert.ok(existsSync(skillMd));
+  const conteudo = readFileSync(skillMd, 'utf-8');
+  assert.match(conteudo, /agent: cursor/);
+  assert.match(conteudo, /Cursor/);
+  // o Cursor exige name igual ao nome da pasta instalada
+  assert.match(conteudo, /^name: onp-spec-driven$/m);
+  // autossuficiente: o motor embarcado veio junto
+  assert.ok(existsSync(path.join(root, '.cursor', 'skills', 'onp-spec-driven', 'scripts', 'onp-spec.mjs')));
+  // o Cursor também lê .agents/skills (e .claude/.codex por compatibilidade):
+  // com a skill do codex instalada ali, o init AVISA o conflito de leitura
+  assert.match(out, /também tem a skill do agente "codex"/);
+  assert.match(out, /rm -rf \.agents\/skills\/onp-spec-driven/);
+  // e rodar de novo mantém, sem erro (aviso não é bloqueio — a escolha é do usuário)
+  const denovo = cli('init', '--agents', 'cursor');
+  assert.equal(denovo.code, 0, denovo.out);
+  assert.match(readFileSync(path.join(root, '.agents', 'skills', 'onp-spec-driven', 'SKILL.md'), 'utf-8'), /agent: codex/);
 });
 
 const SPEC = `# Spec: Pagamentos
@@ -286,6 +312,66 @@ test('plano (codex): md + sh com codex exec (bash válido) + html — sem claude
   assert.equal(planoJson.faixas.length, 2);
 });
 
+test('plano (cursor): md + sh com o CLI do Cursor (bash válido) + html — sem claude -p nem codex exec', () => {
+  const dir = path.join(root, '.spec', 'features', 'pagamentos');
+  const { code, out } = cli('plano', 'pagamentos', '--agents', 'cursor');
+  assert.equal(code, 0, out);
+  assert.match(out, /plano de execução \(cursor\)/);
+  assert.match(out, /executor headless/);
+  // a lista de custos que o agente apresenta para confirmação
+  assert.match(out, /modelos deste plano — CONFIRME com o usuário antes de executar/);
+  assert.match(out, /--modelo composer/);
+  // T-002 pedia claude-opus-5 — no cursor claude-* é slug válido: fica
+  assert.match(out, /T-002 — claude-opus-5/);
+
+  const md = readFileSync(path.join(dir, 'plano-execucao.md'), 'utf-8');
+  assert.match(md, /Execução — Cursor headless \(agent CLI\)/);
+  assert.doesNotMatch(md, /claude -p/);
+  assert.doesNotMatch(md, /codex exec/);
+
+  const shPath = path.join(dir, 'executar-tarefas.sh');
+  assert.ok(statSync(shPath).mode & 0o100, 'script precisa ser executável');
+  const bashN = spawnSync('bash', ['-n', shPath], { encoding: 'utf-8' });
+  assert.equal(bashN.status, 0, `bash -n falhou: ${bashN.stderr}`);
+  const sh = readFileSync(shPath, 'utf-8');
+  assert.match(sh, /CURSOR_BIN=\$\(command -v agent \|\| command -v cursor-agent\)/);
+  assert.match(sh, /"\$CURSOR_BIN" -p "\$3" --model "\$4"/);
+  assert.match(sh, /STREAM_FLAGS=\(--output-format stream-json\)/);
+  assert.match(sh, /CURSOR_FLAGS=\(--force\)/);
+  assert.match(sh, /rodar_tarefa 'faixa-2' 'T-002' '[\s\S]*?' 'claude-opus-5' high/);
+  assert.doesNotMatch(sh, /claude -p/);
+  assert.doesNotMatch(sh, /codex exec/);
+  assert.doesNotMatch(sh, /--effort/, 'o CLI do Cursor não tem flag de esforço');
+  assert.match(sh, /audit --ci/);
+
+  // dispatcher igual ao do claude: reexecução por faixa disponível
+  const listar = spawnSync('bash', [shPath, '--listar'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(listar.status, 0, listar.stderr);
+  assert.match(listar.stdout, /faixa-1\s+onda 1\s+T-001, T-003/);
+  assert.match(listar.stdout, /reexecutar uma faixa/);
+
+  const html = readFileSync(path.join(dir, 'plano-execucao.html'), 'utf-8');
+  assert.doesNotMatch(html, /<button/);
+  assert.match(html, /agent -p/);
+  assert.match(html, /Peça ao agente \(Cursor\)/);
+  assert.doesNotMatch(html, /claude -p/);
+
+  const planoJson = JSON.parse(readFileSync(path.join(dir, 'plano.json'), 'utf-8'));
+  assert.equal(planoJson.agent, 'cursor');
+  assert.equal(planoJson.modo, 'paralelo');
+  assert.equal(planoJson.faixas.length, 2);
+
+  // --esforco no cursor: o plano avisa que o CLI não tem a flag (o nível vai
+  // no slug do modelo) — o valor fica registrado, mas ninguém é enganado
+  const comEsforco = cli('plano', 'pagamentos', '--agents', 'cursor', '--esforco', 'baixo');
+  assert.equal(comEsforco.code, 0, comEsforco.out);
+  assert.match(comEsforco.out, /o CLI do Cursor não tem flag de esforço/);
+});
+
 test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {
   const { code, out } = cli('tarefa', 'pagamentos', 'T-002', 'concluida');
   assert.equal(code, 0, out);
@@ -398,4 +484,41 @@ test('sem .claude, a detecção usa o marcador da skill instalada em .agents (co
   const { code, out } = cli('plano', 'pagamentos');
   assert.equal(code, 0, out);
   assert.match(out, /plano de execução \(codex\)/);
+});
+
+test('motor embarcado do cursor detecta cursor pelo PRÓPRIO marcador (mesmo com .agents no projeto)', () => {
+  const embarcado = path.join(root, '.cursor', 'skills', 'onp-spec-driven', 'scripts', 'onp-spec.mjs');
+  const proc = spawnSync('node', [embarcado, 'plano', 'pagamentos'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(proc.status, 0, `${proc.stdout}\n${proc.stderr}`);
+  assert.match(proc.stdout, /plano de execução \(cursor\)/);
+});
+
+test('sem .claude e sem .agents, a detecção usa o marcador da skill instalada em .cursor', () => {
+  rmSync(path.join(root, '.agents'), { recursive: true, force: true });
+  const { code, out } = cli('plano', 'pagamentos');
+  assert.equal(code, 0, out);
+  assert.match(out, /plano de execução \(cursor\)/);
+});
+
+test('motor num checkout sob ~/.cursor/worktrees NÃO vira detecção de cursor (só .cursor/skills conta)', () => {
+  // os agentes paralelos do Cursor fazem checkout de repositórios em
+  // ~/.cursor/worktrees/<repo> — um motor rodando de lá NÃO é a skill do
+  // cursor, e a detecção tem que respeitar o que está instalado no projeto
+  assert.equal(cli('init', '--agents', 'claude').code, 0);
+  const fake = path.join(root, 'fake-home', '.cursor', 'worktrees', 'onp-spec-driven');
+  mkdirSync(fake, { recursive: true });
+  const REPO_RAIZ = path.join(__dirname, '..');
+  cpSync(path.join(REPO_RAIZ, 'src'), path.join(fake, 'src'), { recursive: true });
+  cpSync(path.join(REPO_RAIZ, 'bin'), path.join(fake, 'bin'), { recursive: true });
+  const proc = spawnSync('node', [path.join(fake, 'bin', 'onp-spec.js'), 'plano', 'pagamentos'], {
+    cwd: root,
+    encoding: 'utf-8',
+    env: { ...process.env, ONP_SPEC_HOME: homeOnp },
+  });
+  assert.equal(proc.status, 0, `${proc.stdout}\n${proc.stderr}`);
+  assert.match(proc.stdout, /plano de execução \(claude\)/, 'a skill do projeto (.claude) decide, não o caminho do motor');
 });

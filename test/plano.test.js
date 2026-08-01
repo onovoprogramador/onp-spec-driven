@@ -311,8 +311,10 @@ test('esforço para o codex: max vira xhigh (o codex não tem "max"); claude man
   assert.equal(esforcoParaAgente('max', 'codex'), 'xhigh');
   assert.equal(esforcoParaAgente('max', 'claude'), 'max');
   assert.equal(esforcoParaAgente('high', 'codex'), 'high');
+  assert.equal(esforcoParaAgente('max', 'cursor'), 'max', 'no cursor o esforço é informativo — passa intacto');
   assert.equal(usaExecutorSh('codex'), true);
   assert.equal(usaExecutorSh('claude'), true);
+  assert.equal(usaExecutorSh('cursor'), true);
   assert.equal(usaExecutorSh('antigravity'), false);
 });
 
@@ -468,6 +470,134 @@ test('md/sh (codex, sequencial): ordem explícita, sem worktrees, mesmo gate', (
   assert.match(sh, /codex exec "\$3"/);
   const dados = JSON.parse(renderPlanoJson(plan));
   assert.equal(dados.agent, 'codex');
+  assert.equal(dados.modo, 'sequencial');
+});
+
+// ── cursor: mesmos artefatos do claude, executor via CLI do Cursor (agent) ─
+
+test('cursor: modelos claude-* são slugs VÁLIDOS — nada é trocado, nem com aviso', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [
+        t('T-001', { files: ['a'], line: 1 }), // herda o default da config (claude-sonnet-5)
+        t('T-002', { files: ['b'], line: 5, model: 'claude-opus-5', esforco: 'max' }),
+        t('T-003', { files: ['c'], line: 9, model: 'composer', esforco: 'alto' }),
+      ],
+    }),
+    'pagamentos',
+    { agent: 'cursor', enginePath: '/tmp/repo-x/bin/onp-spec.js' }
+  );
+  assert.ok(!plan.erro, plan.erro);
+  assert.equal(plan.agent, 'cursor');
+  const [f1, f2, f3] = plan.faixas;
+  assert.equal(f1.tasks[0].model, 'claude-sonnet-5', 'o Cursor serve modelos claude — default passa intacto');
+  assert.equal(f2.tasks[0].model, 'claude-opus-5', 'Modelo: claude-* explícito é respeitado no cursor');
+  assert.equal(f3.tasks[0].model, 'composer', 'modelo da casa do Cursor passa intacto');
+  assert.ok(!plan.avisos.some((a) => a.includes('claude-opus-5')), 'nenhum aviso de troca — não houve troca');
+  // --modelo claude-* também é legítimo no cursor (no codex seria erro)
+  const forcado = montarPlano(
+    projeto({ tasks: [t('T-001', { files: ['a'] })] }),
+    'pagamentos',
+    { agent: 'cursor', modelo: 'claude-opus-5' }
+  );
+  assert.ok(!forcado.erro, forcado.erro);
+  assert.equal(forcado.faixas[0].tasks[0].model, 'claude-opus-5');
+});
+
+test('md (cursor): seção do CLI do Cursor, --force, confirmação de custos e esforço-no-slug — sem claude -p', () => {
+  const md = renderPlanoMd(planPadrao('cursor'));
+  assert.match(md, /Execução — Cursor headless \(agent CLI\)/);
+  assert.match(md, /executar-tarefas\.sh/);
+  assert.match(md, /`agent -p` \(CLI do Cursor\)/);
+  assert.match(md, /--force/);
+  assert.match(md, /resumo geral de andamento/i);
+  assert.match(md, /onp-spec resumo pagamentos/);
+  assert.match(md, /audit --ci/);
+  assert.doesNotMatch(md, /claude -p/, 'plano do cursor não pode depender do CLI do Claude');
+  assert.doesNotMatch(md, /codex exec/, 'nem do CLI do Codex');
+  // a confirmação de custos é parte do artefato — o agente não executa sem ela
+  assert.match(md, /Confirmação de custos — antes de executar/);
+  assert.match(md, /--modelo composer/);
+  assert.match(md, /onp-spec tarefa pagamentos T-xxx --modelo/);
+  // honestidade: o CLI do Cursor não tem flag de esforço — o slug decide
+  assert.match(md, /Esforço no Cursor/);
+  assert.match(md, /gpt-5\.6-terra-high/);
+  assert.match(md, /NÃO vira flag/);
+});
+
+test('sh (cursor): agent -p com --model por tarefa, stream-json, --force e fallback cursor-agent', () => {
+  const sh = renderPlanoSh(planPadrao('cursor'));
+  assert.match(sh, /^#!\/usr\/bin\/env bash/);
+  // binário atual `agent`, com fallback para o nome legado `cursor-agent`
+  assert.match(sh, /CURSOR_BIN=\$\(command -v agent \|\| command -v cursor-agent\)/);
+  assert.match(sh, /curl https:\/\/cursor\.com\/install -fsS \| bash/);
+  // invocação por tarefa: modelo sim, esforço NÃO (não existe flag no CLI)
+  assert.match(sh, /"\$CURSOR_BIN" -p "\$3" --model "\$4" "\$\{STREAM_FLAGS\[@\]}" "\$\{CURSOR_FLAGS\[@\]}"/);
+  assert.match(sh, /STREAM_FLAGS=\(--output-format stream-json\)/);
+  assert.match(sh, /CURSOR_FLAGS=\(--force\)/);
+  assert.doesNotMatch(sh, /--effort/, 'o CLI do Cursor não tem flag de esforço');
+  assert.doesNotMatch(sh, /model_reasoning_effort/, 'nem a config de esforço do codex');
+  assert.doesNotMatch(sh, /command -v claude/, 'executor do cursor não exige o CLI do Claude');
+  assert.doesNotMatch(sh, /claude -p/, 'nenhuma invocação do claude no executor cursor');
+  assert.doesNotMatch(sh, /codex exec/, 'nenhuma invocação do codex no executor cursor');
+  // prompts por tarefa com modelo resolvido (default claude-sonnet-5 é válido no Cursor)
+  assert.match(sh, /rodar_tarefa 'faixa-1' 'T-001' '[\s\S]*?' 'claude-sonnet-5' medium/);
+  assert.match(sh, /rodar_tarefa 'faixa-2' 'T-002' '[\s\S]*?' 'claude-sonnet-5' high/);
+  // resumo por minuto: agent -p SEM --force (somente leitura), modelo da casa
+  assert.match(sh, /RESUMO_MODEL='composer'/);
+  assert.match(sh, /"\$CURSOR_BIN" -p "Você narra[\s\S]*?--model "\$RESUMO_MODEL"/);
+  const resumoIdx = sh.indexOf('"$CURSOR_BIN" -p "Você narra');
+  const resumoFim = sh.indexOf('2>/dev/null)', resumoIdx);
+  assert.ok(!sh.slice(resumoIdx, resumoFim).includes('--force'), 'resumo por minuto é somente leitura (sem --force)');
+  // infraestrutura idêntica à do claude: worktrees, merge, ledger, gate, dispatcher
+  assert.match(sh, /git worktree add "\$3" -b/);
+  assert.match(sh, /mesclar_faixa 'faixa-1'/);
+  assert.match(sh, /executar_seq_T_003/);
+  assert.match(sh, /evento\(\) \{ node "\$ENGINE" evento --run "\$RUN_ID"/);
+  assert.match(sh, /--faixa\) MODO="faixa"; ALVO="\$\{2:-}"; shift ;;/);
+  assert.match(sh, /--sem-gate\) COM_GATE=0/);
+  assert.match(sh, /rodar_gate/);
+  assert.match(sh, /audit --ci/);
+  assert.match(sh, /📣 resumo/);
+});
+
+test('sh (cursor): --sem-gate NUNCA anuncia alinhamento (paridade com o claude)', () => {
+  const sh = renderPlanoSh(planPadrao('cursor'));
+  const semGate = sh.slice(sh.indexOf('if [ "$COM_GATE" -eq 0 ]'), sh.indexOf('rodar_gate\n  local audit'));
+  assert.match(semGate, /NÃO é prova de nada/);
+  assert.doesNotMatch(semGate, /audit exit 0/);
+  assert.match(semGate, /evento --tipo fim --exit 1/);
+});
+
+test('html (cursor): visual cita o CLI do Cursor, sem botão e sem claude', () => {
+  const plan = montarPlano(
+    projeto({ tasks: [t('T-001', { files: ['src/a.js'] })] }),
+    'pagamentos',
+    { agent: 'cursor' }
+  );
+  const html = renderPlanoHtml(plan);
+  assert.doesNotMatch(html, /<button/);
+  assert.match(html, /Peça ao agente \(Cursor\)/);
+  assert.match(html, /agent -p/);
+  assert.doesNotMatch(html, /claude -p/);
+  assert.doesNotMatch(html, /codex exec/);
+});
+
+test('md/sh (cursor, sequencial): ordem explícita, sem worktrees, mesmo gate', () => {
+  const proj = projeto({
+    tasks: [t('T-001', { files: ['src/a.js'], line: 1 }), t('T-002', { files: ['src/b.js'], line: 5 })],
+  });
+  const plan = montarPlano(proj, 'pagamentos', { agent: 'cursor', sequencial: true, enginePath: '/tmp/repo-x/bin/onp-spec.js' });
+  const md = renderPlanoMd(plan);
+  assert.match(md, /modo SEQUENCIAL \(escolha do usuário\)/);
+  assert.match(md, /Execução — Cursor headless/);
+  assert.doesNotMatch(md, /## Faixas e ondas/);
+  const sh = renderPlanoSh(plan);
+  assert.match(sh, /executar_seq_T_001/);
+  assert.doesNotMatch(sh, /executar_faixa_/);
+  assert.match(sh, /"\$CURSOR_BIN" -p "\$3"/);
+  const dados = JSON.parse(renderPlanoJson(plan));
+  assert.equal(dados.agent, 'cursor');
   assert.equal(dados.modo, 'sequencial');
 });
 

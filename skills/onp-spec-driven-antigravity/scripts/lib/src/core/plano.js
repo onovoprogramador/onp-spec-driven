@@ -20,6 +20,11 @@
 //                 `codex exec` headless (--json, --sandbox, --model e
 //                 model_reasoning_effort por tarefa) — nunca depende do CLI
 //                 do Claude
+//   cursor      → mesmos artefatos do claude, mas o executor roda o CLI do
+//                 Cursor (`agent -p`, legado `cursor-agent`) com
+//                 --output-format stream-json e --force (sem --force o modo
+//                 print não modifica arquivos); o Cursor não tem flag de
+//                 esforço — esforço é sufixo do slug do modelo
 //   antigravity → plano-execucao.md com comandos de worktree e um PROMPT
 //                 pronto por faixa, para os agentes paralelos nativos do
 //                 Antigravity (nunca depende de CLI nenhum)
@@ -27,12 +32,12 @@
 import path from 'path';
 import { foldStatus } from '../util/text.js';
 
-export const AGENTES = ['claude', 'antigravity', 'codex'];
+export const AGENTES = ['claude', 'antigravity', 'codex', 'cursor'];
 
 // agentes cujo plano gera executar-tarefas.sh + plano-execucao.html (CLI
 // headless próprio); o antigravity executa com os agentes nativos dele
 export function usaExecutorSh(agent) {
-  return agent === 'claude' || agent === 'codex';
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor';
 }
 
 // esforço aceito em PT ou EN → nível do CLI (`claude --effort <nível>`)
@@ -60,6 +65,13 @@ const MODELO_CODEX = 'gpt-5.6-terra';
 const RESUMO_MODEL_CODEX = 'gpt-5.6-luna';
 const ehModeloClaude = (m) => /^claude-/.test(String(m || ''));
 
+// no Cursor, modelos claude-* são slugs VÁLIDOS (o Cursor serve Claude, GPT,
+// Gemini e os modelos da casa) — nada é trocado. Só o modelo do resumo por
+// minuto muda quando ainda é o default claude-haiku-4-5 (não é slug do
+// Cursor): entra o composer, modelo da casa com uso incluído nos planos.
+const RESUMO_MODEL_CURSOR = 'composer';
+const RESUMO_MODEL_DEFAULT = 'claude-haiku-4-5';
+
 // o codex não tem nível "max" — o teto do model_reasoning_effort é xhigh
 export function esforcoParaAgente(esforcoCli, agent) {
   if (agent === 'codex' && esforcoCli === 'max') return 'xhigh';
@@ -67,8 +79,9 @@ export function esforcoParaAgente(esforcoCli, agent) {
 }
 
 export function resumoModelParaAgente(cfg, agent) {
-  const m = cfg.resumoModel || 'claude-haiku-4-5';
+  const m = cfg.resumoModel || RESUMO_MODEL_DEFAULT;
   if (agent === 'codex' && ehModeloClaude(m)) return RESUMO_MODEL_CODEX;
+  if (agent === 'cursor' && m === RESUMO_MODEL_DEFAULT) return RESUMO_MODEL_CURSOR;
   return m;
 }
 
@@ -489,11 +502,20 @@ export function renderPlanoMd(plan) {
   L.push('');
   if (usaExecutorSh(plan.agent)) {
     const codex = plan.agent === 'codex';
-    const cliTarefa = codex ? '`codex exec`' : '`claude -p`';
+    const cursor = plan.agent === 'cursor';
+    const cliTarefa = codex ? '`codex exec`' : cursor ? '`agent -p` (CLI do Cursor)' : '`claude -p`';
     const ajustes = codex
       ? `\`--model\` e \`model_reasoning_effort\` já definidos por tarefa e sandbox \`${plan.cfg.sandbox}\``
-      : `\`--model\` e \`--effort\` já definidos por tarefa e permissões \`${plan.cfg.permissionMode}\``;
-    L.push(codex ? '### ▶ Execução — Codex headless (codex exec)' : '### ▶ Execução — Claude Code headless');
+      : cursor
+        ? '`--model` já definido por tarefa e `--force` (sem ele o modo print do Cursor não modifica arquivos)'
+        : `\`--model\` e \`--effort\` já definidos por tarefa e permissões \`${plan.cfg.permissionMode}\``;
+    L.push(
+      codex
+        ? '### ▶ Execução — Codex headless (codex exec)'
+        : cursor
+          ? '### ▶ Execução — Cursor headless (agent CLI)'
+          : '### ▶ Execução — Claude Code headless'
+    );
     L.push('');
     L.push('```bash');
     L.push(`bash ${plan.baseDir}/executar-tarefas.sh`);
@@ -516,6 +538,18 @@ export function renderPlanoMd(plan) {
       L.push('dentro da licença/cota dele (modelo forte + esforço alto torra tokens).');
       L.push(`Para gastar menos: \`onp-spec plano ${plan.feature} --modelo gpt-5.6-luna --esforco baixo\``);
       L.push(`(tudo) ou por tarefa \`onp-spec tarefa ${plan.feature} T-xxx --modelo <m> --esforco <nível>\` — e regenere o plano.`);
+    }
+    if (cursor) {
+      L.push('');
+      L.push('**Confirmação de custos — antes de executar**: os modelos por tarefa estão');
+      L.push('nas tabelas acima; o agente CONFIRMA com o usuário se estão dentro do plano');
+      L.push('dele no Cursor (modelos claude-*/gpt-* são cobrados por uso; `composer` tem');
+      L.push(`uso incluído nos planos pagos). Para gastar menos: \`onp-spec plano ${plan.feature} --modelo composer\``);
+      L.push(`(tudo) ou por tarefa \`onp-spec tarefa ${plan.feature} T-xxx --modelo <m>\` — e regenere o plano.`);
+      L.push('');
+      L.push('**Esforço no Cursor**: o CLI não tem flag de esforço — o nível vai embutido');
+      L.push('no slug do modelo (ex.: `gpt-5.6-terra-high`). A coluna "esforço" acima é');
+      L.push('informativa e NÃO vira flag; para controlar o esforço, escolha o slug.');
     }
     L.push('');
     L.push('### 📣 Acompanhamento — tabela + resumo no chat (a cada 1 min)');
@@ -699,6 +733,7 @@ export function renderPlanoSh(plan) {
   P('set -o pipefail');
   P('');
   const codex = plan.agent === 'codex';
+  const cursor = plan.agent === 'cursor';
   P(`RUN_ID=${shq(plan.runId)}`);
   P(`FEATURE=${shq(plan.feature)}`);
   P(`BASE_BRANCH=${shq(plan.branchTrabalho)}`);
@@ -706,6 +741,11 @@ export function renderPlanoSh(plan) {
   if (codex) {
     P(`CODEX_FLAGS=(--sandbox ${shq(plan.cfg.sandbox || 'workspace-write')})`);
     P('STREAM_FLAGS=(--json)');
+  } else if (cursor) {
+    P('# --force: sem ele o modo print do Cursor só propõe alterações (não escreve).');
+    P('# Controle fino é do usuário: permissions.deny em .cursor/cli.json VENCE o --force.');
+    P('CURSOR_FLAGS=(--force)');
+    P('STREAM_FLAGS=(--output-format stream-json)');
   } else {
     P(`CLAUDE_FLAGS=(--permission-mode ${plan.cfg.permissionMode} --allowedTools ${shq(allowedTools(plan))})`);
     P('STREAM_FLAGS=(--output-format stream-json --verbose)');
@@ -731,6 +771,9 @@ export function renderPlanoSh(plan) {
   P('  command -v node >/dev/null 2>&1 || falhar "node não encontrado"');
   if (codex) {
     P('  command -v codex >/dev/null 2>&1 || falhar "Codex CLI (codex) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
+  } else if (cursor) {
+    P('  # binário atual do CLI do Cursor é `agent`; `cursor-agent` é o nome legado');
+    P('  CURSOR_BIN=$(command -v agent || command -v cursor-agent) || falhar "CLI do Cursor (agent) não encontrado — instale: curl https://cursor.com/install -fsS | bash"');
   } else {
     P('  command -v claude >/dev/null 2>&1 || falhar "Claude Code CLI (claude) não encontrado — instale-o ou siga o modo manual em plano-execucao.md"');
   }
@@ -781,7 +824,7 @@ export function renderPlanoSh(plan) {
   P('  printf "%s" "$n"');
   P('}');
   P('');
-  P(`# uma tarefa = uma sessão ${codex ? 'codex exec' : 'claude'} headless com contexto limpo.`);
+  P(`# uma tarefa = uma sessão ${codex ? 'codex exec' : cursor ? 'agent (Cursor)' : 'claude'} headless com contexto limpo.`);
   P('# o JSONL da sessão vira o stream da tarefa no ledger');
   P('rodar_tarefa() { # $1=escopo(faixa|seq) $2=T-xxx $3=prompt $4=modelo $5=esforço');
   P('  local chave="$1--$2"');
@@ -792,6 +835,11 @@ export function renderPlanoSh(plan) {
     P('  # --add-dir: o .git compartilhado dos worktrees mora no repo principal —');
     P('  # sem ele o sandbox workspace-write bloquearia o commit da tarefa');
     P('  if codex exec "$3" --model "$4" -c model_reasoning_effort="$5" "${STREAM_FLAGS[@]}" "${CODEX_FLAGS[@]}" --add-dir "$TOPLEVEL" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
+  } else if (cursor) {
+    P('  info "$2 — agent -p ($4) · stream: $chave"');
+    P('  # $5 (esforço) não vira flag: o CLI do Cursor não tem reasoning effort —');
+    P('  # o nível vai embutido no slug do modelo (ex.: gpt-5.6-terra-high)');
+    P('  if "$CURSOR_BIN" -p "$3" --model "$4" "${STREAM_FLAGS[@]}" "${CURSOR_FLAGS[@]}" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
   } else {
     P('  info "$2 — claude -p ($4 · $5) · stream: $chave"');
     P('  if claude -p "$3" --model "$4" --effort "$5" "${STREAM_FLAGS[@]}" "${CLAUDE_FLAGS[@]}" > "$stream" 2>>"$LOG_DIR/$1.log"; then');
@@ -831,14 +879,16 @@ export function renderPlanoSh(plan) {
   P('}');
   P('');
   P('# ── resumo geral de andamento: 1/min enquanto a execução roda ─────────');
-  P(`# escrito por IA (${codex ? 'codex exec somente leitura' : 'claude -p, sem ferramentas'}) com fallback do motor; vai`);
+  P(
+    `# escrito por IA (${codex ? 'codex exec somente leitura' : cursor ? 'agent -p sem --force, somente leitura' : 'claude -p, sem ferramentas'}) com fallback do motor; vai`
+  );
   P('# para o terminal e para o ledger — o agente repassa o texto no chat.');
   P('gerar_resumo() {');
   P('  local ctx ia');
   P('  ctx=$(node "$ENGINE" resumo "$FEATURE" --contexto 2>/dev/null) || ctx=""');
   P('  [ -n "$ctx" ] || return 0');
   P(
-    `  ia=$(${codex ? 'codex exec' : 'claude -p'} "Você narra, para o dono do produto, uma execução de tarefas de código em andamento. Estado mecânico:`
+    `  ia=$(${codex ? 'codex exec' : cursor ? '"$CURSOR_BIN" -p' : 'claude -p'} "Você narra, para o dono do produto, uma execução de tarefas de código em andamento. Estado mecânico:`
   );
   P('');
   P('$ctx');
@@ -1054,8 +1104,13 @@ export function renderPlanoHtml(plan) {
   const paralelas = plan.faixas.reduce((n, fx) => n + fx.tasks.length, 0);
   const sequencial = plan.modo === 'sequencial';
   const codexHtml = plan.agent === 'codex';
-  const agenteRotulo = codexHtml ? 'Codex' : 'Claude Code';
-  const cliRotulo = codexHtml ? '<code>codex exec</code>' : '<code>claude -p</code>';
+  const cursorHtml = plan.agent === 'cursor';
+  const agenteRotulo = codexHtml ? 'Codex' : cursorHtml ? 'Cursor' : 'Claude Code';
+  const cliRotulo = codexHtml
+    ? '<code>codex exec</code>'
+    : cursorHtml
+      ? '<code>agent -p</code> (CLI do Cursor)'
+      : '<code>claude -p</code>';
   const card = (t) => `
         <div class="tarefa">
           <span class="tid">${esc(t.id)}</span>

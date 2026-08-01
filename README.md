@@ -50,6 +50,36 @@ casa com ela, ou invoque explicitamente com `$onp-spec-driven`.
 > por tarefa (`onp-spec tarefa <feature> T-xxx --modelo <m> --esforco <nível>`)
 > ou propor o modelo que quiser. Sem a sua confirmação, nada roda.
 
+### Cursor
+
+Na **raiz do seu projeto**:
+
+```bash
+npx @onovoprogramador/onp-spec init --agents cursor
+```
+
+Isso cria a estrutura `.spec/` **e** instala a skill em
+`.cursor/skills/onp-spec-driven/` (o Cursor suporta Agent Skills nativamente
+desde o 2.4, no editor e no CLI). Abra uma conversa nova: a skill entra
+sozinha quando o pedido casa com ela, ou invoque explicitamente digitando
+`/onp-spec-driven` no chat do Agent.
+
+> **Seus tokens, sua escolha:** no Cursor, modelos `claude-*`/`gpt-*` são
+> cobrados por uso e o `composer` (modelo da casa) tem uso incluído nos
+> planos pagos. Antes de executar qualquer plano, o agente mostra o **modelo
+> de cada tarefa** e pergunta se está dentro do seu plano — você pode manter,
+> travar tudo no modelo incluído (`onp-spec plano <feature> --modelo
+> composer`), ajustar por tarefa (`onp-spec tarefa <feature> T-xxx --modelo
+> <m>`) ou propor o modelo que quiser. Sem a sua confirmação, nada roda.
+> Esforço de raciocínio no Cursor vai embutido no slug do modelo (ex.:
+> `gpt-5.6-terra-high`) — não existe flag.
+
+> **Para a execução paralela automática**, o executor usa o CLI do Cursor
+> (`agent`, nome legado `cursor-agent`) em modo headless — instale com
+> `curl https://cursor.com/install -fsS | bash` e faça login. Sem o CLI, o
+> plano continua funcionando na rota manual (os prompts de cada faixa vêm
+> prontos para os agentes paralelos da Agents Window).
+
 ### Antigravity
 
 Na **raiz do seu projeto**:
@@ -77,6 +107,10 @@ cp -r /tmp/onp-spec/skills/onp-spec-driven .claude/skills/onp-spec-driven
 mkdir -p .agents/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven-codex .agents/skills/onp-spec-driven
 
+# Cursor (neste projeto)
+mkdir -p .cursor/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-cursor .cursor/skills/onp-spec-driven
+
 # Antigravity (neste workspace)
 mkdir -p .agents/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity .agents/skills/onp-spec-driven
@@ -84,15 +118,31 @@ cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity .agents/skills/onp-spec-d
 
 Quer a skill disponível em **todos** os seus projetos? Copie para o diretório
 global do agente em vez do projeto: `~/.claude/skills/` (Claude Code),
-`~/.agents/skills/` (Codex) ou `~/.gemini/config/skills/` (Antigravity).
+`~/.agents/skills/` (Codex), `~/.cursor/skills/` (Cursor) ou
+`~/.gemini/config/skills/` (Antigravity) — **sempre com a pasta destino
+chamada `onp-spec-driven`**, como nos exemplos acima (o Cursor exige que o
+nome da pasta seja igual ao `name:` da skill; copiar como
+`onp-spec-driven-cursor` a deixaria inválida):
+
+```bash
+# exemplo (Cursor, global)
+mkdir -p ~/.cursor/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-cursor ~/.cursor/skills/onp-spec-driven
+```
 
 > **Importante:** cada agente tem a SUA skill — a do Claude Code executa o
 > plano com sessões headless paralelas do próprio Claude; a do Codex, com
-> sessões headless `codex exec`; a do Antigravity usa os agentes paralelos
-> nativos dele. **Codex e Antigravity leem o mesmo diretório**
-> (`.agents/skills/`), então instale ali a skill do agente que você usa neste
-> projeto — o `init` se recusa a sobrescrever a skill de um agente pela do
-> outro (a skill sabe se defender, mas por que arriscar?).
+> sessões headless `codex exec`; a do Cursor, com sessões headless do CLI do
+> Cursor (`agent -p`); a do Antigravity usa os agentes paralelos nativos
+> dele. **Codex e Antigravity leem o mesmo diretório** (`.agents/skills/`),
+> então instale ali a skill do agente que você usa neste projeto — o `init`
+> se recusa a sobrescrever a skill de um agente pela do outro. **Atenção com
+> o Cursor:** além do diretório próprio (`.cursor/skills/`), o Cursor também
+> lê `.agents/skills/` nativamente e `.claude/skills/`/`.codex/skills/` por
+> compatibilidade — num projeto que já tem a skill de OUTRO agente
+> instalada, o Cursor enxergaria duas skills com o mesmo nome e poderia
+> carregar a errada. Use a skill de UM agente por projeto (o `init
+> --agents cursor` avisa se encontrar outra variante instalada).
 
 ## Como usar — você fala, o agente prova
 

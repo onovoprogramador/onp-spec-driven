@@ -162,6 +162,26 @@ test('ultimaAcao lê só a cauda do stream e tolera arquivo ausente', () => {
   assert.equal(ultimaAcao(runId, 'nao--existe'), null);
 });
 
+test('ultimaAcao entende o tool_call do CLI do Cursor (inclusive started, ainda em execução)', () => {
+  const runId = plano();
+  const chave = 'faixa-1--T-002';
+  mkdirSync(path.dirname(caminhoStream(runId, chave)), { recursive: true });
+  writeFileSync(
+    caminhoStream(runId, chave),
+    [
+      '{"type":"system","subtype":"init","session_id":"abc","model":"composer"}',
+      '{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"shellToolCall":{"args":{"command":"node --test"}}}}',
+    ].join('\n')
+  );
+  assert.equal(ultimaAcao(runId, chave), 'Bash: node --test', 'started mostra o que roda AGORA');
+
+  writeFileSync(
+    caminhoStream(runId, chave),
+    '{"type":"tool_call","subtype":"completed","call_id":"c2","tool_call":{"readToolCall":{"args":{"path":"/a/b/spec.md"},"result":{"success":{"content":"x"}}}}}\n'
+  );
+  assert.equal(ultimaAcao(runId, chave), 'Read: a/b/spec.md');
+});
+
 test('tabelaAndamento: uma linha por tarefa, com onde roda, status e última ação', () => {
   const runId = plano();
   registrarEvento({ tipo: 'tarefa', runId, faixa: 'faixa-1', tarefa: 'T-001', estado: 'executando', stream: 'faixa-1--T-001' });

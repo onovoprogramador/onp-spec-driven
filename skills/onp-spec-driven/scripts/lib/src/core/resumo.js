@@ -2,9 +2,9 @@
 // executor imprime no terminal a cada ~1 minuto durante a execução.
 //
 // Duas origens, sempre rotuladas:
-//   'ia'    — escrito por um modelo (o executor headless chama `claude -p`
-//             ou `codex exec`; no Antigravity é o próprio agente que
-//             escreve) e gravado com
+//   'ia'    — escrito por um modelo (o executor headless chama `claude -p`,
+//             `codex exec` ou o CLI do Cursor `agent -p`; no Antigravity é
+//             o próprio agente que escreve) e gravado com
 //             `onp-spec resumo <feature> --gravar --texto "..."`
 //   'motor' — determinístico, montado da árvore do ledger. É o fallback
 //             sempre disponível: zero dependências, zero rede, zero modelo.
@@ -14,7 +14,13 @@
 // "executando" seria mentira.
 
 import { openSync, closeSync, readSync, statSync, existsSync } from 'fs';
-import { registrarEvento, caminhoStream, resumoFerramenta, resumoItemCodex } from './ledger.js';
+import {
+  registrarEvento,
+  caminhoStream,
+  resumoFerramenta,
+  resumoItemCodex,
+  resumoToolCallCursor,
+} from './ledger.js';
 
 export const FRESCOR_IA_MS = 2 * 60 * 1000;
 
@@ -63,6 +69,11 @@ export function ultimaAcao(runId, chave, { maxBytes = 4096 } = {}) {
         const t = String(e.item.text).trim().split('\n')[0];
         return t.length > 120 ? `${t.slice(0, 120)}…` : t;
       }
+    }
+    // CLI do Cursor: tool_call started mostra a ferramenta ainda em execução
+    if (e.type === 'tool_call' && e.tool_call) {
+      const fer = resumoToolCallCursor(e.tool_call);
+      if (fer) return fer.resumo ? `${fer.nome}: ${fer.resumo}` : fer.nome;
     }
   }
   return null;

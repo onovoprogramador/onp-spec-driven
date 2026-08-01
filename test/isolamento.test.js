@@ -59,7 +59,15 @@ test('nenhuma execução de teste vazou para o ledger do usuário', () => {
         return {};
       }
     })
-    .filter((e) => /^onpspec-(agents|reexec|iso|painel|ledger|ui|e2e)-/.test(e.projeto || ''))
+    .filter(
+      (e) =>
+        // repo na raiz do mkdtemp: o prefixo aparece no nome do projeto;
+        // repo em subpasta (<tmp>/projeto, caso dos testes reexec): o
+        // prefixo só aparece no CAMINHO — sem olhar projetoDir, um
+        // vazamento dos testes reexec passaria despercebido
+        /^onpspec-(agents|reexec|iso|painel|ledger|ui|e2e)-/.test(e.projeto || '') ||
+        /onpspec-(agents|reexec|iso|painel|ledger|ui|e2e)-/.test(e.projetoDir || '')
+    )
     .map((e) => e.runId);
   assert.deepEqual(
     vazados,

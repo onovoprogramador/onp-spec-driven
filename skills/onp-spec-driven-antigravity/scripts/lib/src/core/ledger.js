@@ -20,8 +20,11 @@
 //
 // O stream de cada tarefa é o JSONL cru do CLI headless do agente —
 // `claude -p --output-format stream-json` (eventos system/assistant/user/
-// result) ou `codex exec --json` (eventos thread.*/turn.*/item.*) — e o
-// parser abaixo transforma qualquer um dos dois em linha do tempo legível.
+// result), `codex exec --json` (eventos thread.*/turn.*/item.*) ou o CLI do
+// Cursor `agent -p --output-format stream-json` (eventos system/assistant/
+// tool_call/result; init, assistant e result têm o MESMO shape do claude —
+// só as ferramentas chegam como tool_call) — e o parser abaixo transforma
+// qualquer um dos três em linha do tempo legível.
 
 import os from 'os';
 import path from 'path';
@@ -266,6 +269,70 @@ export function resumoItemCodex(item = {}) {
   }
 }
 
+// resumo de uma linha por tool_call do CLI do Cursor (`agent -p
+// --output-format stream-json`): o corpo vem em `tool_call.<nome>ToolCall`
+// com `args` e, no completed, `result` (chave `success` = deu certo;
+// qualquer outra = erro). Devolve {nome, resumo, erro, temResultado, saida}
+// ou null quando o shape não é reconhecido.
+const NOMES_TOOL_CURSOR = {
+  shell: 'Bash',
+  terminal: 'Bash',
+  bash: 'Bash',
+  read: 'Read',
+  write: 'Write',
+  edit: 'Edit',
+  delete: 'Delete',
+  ls: 'Ls',
+  glob: 'Glob',
+  grep: 'Grep',
+  search: 'Grep',
+  fetch: 'WebFetch',
+  webfetch: 'WebFetch',
+  websearch: 'WebSearch',
+  mcp: 'MCP',
+  todo: 'Plano',
+};
+
+export function resumoToolCallCursor(toolCall = {}) {
+  const chave = Object.keys(toolCall).find((k) => k.endsWith('ToolCall'));
+  if (!chave) return null;
+  const corpo = toolCall[chave] || {};
+  const args = corpo.args || {};
+  const base = chave.slice(0, -'ToolCall'.length);
+  const nome =
+    NOMES_TOOL_CURSOR[base.toLowerCase()] || (base ? base[0].toUpperCase() + base.slice(1) : 'Ferramenta');
+  const rel = (p) => String(p || '').split('/').slice(-3).join('/');
+  const str = (v) => (typeof v === 'string' && v ? v : null);
+  // ordem: o que importa ver ao vivo — comando > padrão/consulta > caminho
+  // (num grep com pattern E path, esconder o pattern seria esconder a busca)
+  let resumo = '';
+  const comando = str(args.command);
+  const busca = str(args.pattern) ?? str(args.query) ?? str(args.url);
+  const caminho = str(args.path) ?? str(args.file_path);
+  if (comando) resumo = corta(comando, 200);
+  else if (busca) resumo = corta(busca, 120);
+  else if (caminho) resumo = rel(caminho);
+  else {
+    const chaves = Object.keys(args);
+    if (chaves.length) resumo = corta(`${chaves[0]}: ${JSON.stringify(args[chaves[0]])}`, 160);
+  }
+  const resultado = corpo.result;
+  const temResultado = resultado != null && typeof resultado === 'object';
+  const erro = temResultado && !('success' in resultado);
+  // saída legível quando o resultado traz texto (o shape varia por ferramenta)
+  let saida = null;
+  if (temResultado) {
+    const dono = erro ? Object.values(resultado)[0] : resultado.success;
+    if (typeof dono === 'string') saida = dono;
+    else if (dono && typeof dono === 'object') {
+      const texto = dono.output ?? dono.stdout ?? dono.content ?? dono.message ?? null;
+      if (typeof texto === 'string') saida = texto;
+      else if (erro) saida = corta(JSON.stringify(dono), 300);
+    }
+  }
+  return { nome, resumo, erro, temResultado, saida };
+}
+
 function textoDeConteudo(conteudo) {
   if (typeof conteudo === 'string') return conteudo;
   if (Array.isArray(conteudo)) {
@@ -348,6 +415,24 @@ export function resumirStream(texto, { desde = 0 } = {}) {
         tokensEntrada: e.usage?.input_tokens ?? null,
       };
       itens.push({ tipo: 'fim', ...resumo, texto: corta(e.result, 600) });
+    } else if (e.type === 'tool_call' && e.subtype === 'completed' && e.tool_call) {
+      // CLI do Cursor: a ferramenta chega como tool_call (started/completed);
+      // só o completed entra na linha do tempo — o started viraria duplicata
+      const fer = resumoToolCallCursor(e.tool_call);
+      if (fer) {
+        pensando = null;
+        itens.push({
+          tipo: 'ferramenta',
+          nome: fer.nome,
+          resumo: fer.resumo,
+          detalhe: corta(JSON.stringify(e.tool_call, null, 2), 1200),
+        });
+        // como no codex, chamada e resultado chegam juntos — o parser separa
+        // para a linha do tempo ficar igual à do claude (ferramenta + saída)
+        if (fer.saida != null || fer.erro) {
+          itens.push({ tipo: 'saida', erro: fer.erro, texto: corta(fer.saida ?? '', 600) });
+        }
+      }
     } else if (e.type === 'thread.started') {
       // codex exec --json: começo da sessão
       itens.push({ tipo: 'inicio', modelo: e.model || null, sessao: String(e.thread_id || '').slice(0, 8) });

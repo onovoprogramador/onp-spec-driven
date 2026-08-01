@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex'];
+const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex', 'onp-spec-driven-cursor'];
 export const ENTRY = `#!/usr/bin/env node
 // Entrypoint do motor embarcado da skill onp-spec-driven.
 // Uso (a partir da RAIZ do projeto do usuário):

@@ -4,7 +4,7 @@ description: Desenvolvimento spec-anchored nativo para Antigravity — a especif
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
-  version: 3.5.0
+  version: 3.6.0
   agent: antigravity
 ---
 

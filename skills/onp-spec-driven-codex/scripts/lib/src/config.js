@@ -24,7 +24,9 @@ export const DEFAULT_CONFIG = {
   paralelo: {
     // máximo de faixas rodando ao mesmo tempo numa onda
     maxParalelas: 3,
-    // modelo default por tarefa (tasks.md pode sobrescrever com `- Modelo:`)
+    // modelo default por tarefa (tasks.md pode sobrescrever com `- Modelo:`;
+    // claude-sonnet-5 também é slug válido no Cursor — no codex vira
+    // gpt-5.6-terra, que é da família dele)
     model: 'claude-sonnet-5',
     // esforço default: baixo|medio|alto|xalto|max (ou low|medium|high|xhigh|max)
     esforco: 'medium',
@@ -39,7 +41,8 @@ export const DEFAULT_CONFIG = {
     sandbox: 'workspace-write',
     // modelo que escreve o "resumo geral de andamento" a cada minuto
     // (default do claude; no codex o plano usa gpt-5.6-luna se este valor
-    // continuar sendo um modelo claude-*)
+    // continuar sendo um modelo claude-*; no cursor vira composer enquanto
+    // este valor for o default — claude-haiku-4-5 não é slug do Cursor)
     resumoModel: 'claude-haiku-4-5',
   },
 };

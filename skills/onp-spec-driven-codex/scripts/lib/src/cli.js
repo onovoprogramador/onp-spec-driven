@@ -66,6 +66,17 @@ const SKILL_DIR_POR_AGENTE = {
   claude: 'onp-spec-driven',
   antigravity: 'onp-spec-driven-antigravity',
   codex: 'onp-spec-driven-codex',
+  cursor: 'onp-spec-driven-cursor',
+};
+
+// diretório de skills que cada agente lê DENTRO do projeto (o nome da pasta
+// da skill instalada é sempre onp-spec-driven — no Cursor o `name:` do
+// frontmatter TEM que ser igual ao nome da pasta)
+const SKILLS_DIR_PROJETO = {
+  claude: '.claude',
+  antigravity: '.agents',
+  codex: '.agents',
+  cursor: '.cursor',
 };
 
 function resolveSkillDir(agent = 'claude') {
@@ -88,11 +99,11 @@ const HELP = `onp-spec — spec-anchored development (a especificação que cont
 uso: onp-spec <comando> [opções]
 
 comandos:
-  init [--preset base|lgpd-educacao] [--agents claude|antigravity|codex]
+  init [--preset base|lgpd-educacao] [--agents claude|antigravity|codex|cursor]
                       cria .spec/, constituição e config no diretório atual
                       (--agents também instala a skill do agente escolhido)
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
-  plano <feature> [--agents claude|antigravity|codex] [--paralelizar T-xxx,T-yyy]
+  plano <feature> [--agents claude|antigravity|codex|cursor] [--paralelizar T-xxx,T-yyy]
                   [--sequencial] [--modelo <modelo>] [--esforco <nível>]
                       plano de execução. Default: agrupa tarefas em faixas
                       PARALELAS (arquivos disjuntos → 1 worktree + 1 branch +
@@ -110,6 +121,10 @@ comandos:
                       · codex: executar-tarefas.sh (codex exec headless com
                         --json, sandbox e --model/model_reasoning_effort por
                         tarefa) + plano-execucao.html (visual)
+                      · cursor: executar-tarefas.sh (CLI do Cursor headless:
+                        agent -p com --model por tarefa, stream-json e
+                        --force; esforço vai no slug do modelo) +
+                        plano-execucao.html (visual)
                       · antigravity: prompts prontos p/ os agentes nativos
                         (não depende de CLI nenhum)
                       Custo é escolha do USUÁRIO: --modelo/--esforco travam
@@ -229,17 +244,20 @@ function cmdInit(rootDir, flags) {
       console.error(`--agents desconhecido: "${flags.agents}" (use: ${AGENTES.join(', ')})`);
       return 2;
     }
-    const rotulo = { claude: 'Claude Code', antigravity: 'Antigravity', codex: 'Codex' }[agent];
-    // Codex e Antigravity leem o MESMO diretório de skills do projeto
-    // (.agents/skills — o padrão cross-agent que o Codex adota); o marcador
-    // `agent:` no frontmatter diz de quem é a skill instalada.
-    const destRel = path.join(agent === 'claude' ? '.claude' : '.agents', 'skills', 'onp-spec-driven');
+    const rotulo = { claude: 'Claude Code', antigravity: 'Antigravity', codex: 'Codex', cursor: 'Cursor' }[agent];
+    // Cada agente lê seu diretório de skills no projeto (.claude, .cursor);
+    // Codex e Antigravity leem o MESMO (.agents/skills — o padrão cross-agent
+    // que o Codex adota). O marcador `agent:` no frontmatter diz de quem é a
+    // skill instalada.
+    const destRel = path.join(SKILLS_DIR_PROJETO[agent], 'skills', 'onp-spec-driven');
     const dest = path.join(rootDir, destRel);
     const skillDir = resolveSkillDir(agent);
     const marcadorExistente = skillAgentMarker(dest);
     if (marcadorExistente && marcadorExistente !== agent) {
+      const nota =
+        SKILLS_DIR_PROJETO[agent] === '.agents' ? ' — Codex e Antigravity compartilham esse diretório.' : '.';
       console.error(
-        `✘ ${destRel} já contém a skill do agente "${marcadorExistente}" — Codex e Antigravity compartilham esse diretório.\n` +
+        `✘ ${destRel} já contém a skill do agente "${marcadorExistente}"${nota}\n` +
           `  Para trocar de agente, remova a pasta antes: rm -rf ${destRel}`
       );
       return 2;
@@ -253,6 +271,20 @@ function cmdInit(rootDir, flags) {
     } else {
       copyDirIfExists(skillDir, dest);
       console.log(`✔ skill instalada em ${destRel} (${rotulo})`);
+    }
+    // o Cursor lê .cursor/skills E .agents/skills nativamente (e .claude/
+    // .codex por compatibilidade) — duas variantes no mesmo projeto = duas
+    // skills com o MESMO nome, e o Cursor pode carregar a errada
+    if (agent === 'cursor') {
+      for (const outroDir of ['.claude', '.agents']) {
+        const marcadorOutro = skillAgentMarker(path.join(rootDir, outroDir, 'skills', 'onp-spec-driven'));
+        if (marcadorOutro && marcadorOutro !== 'cursor') {
+          console.log(
+            `⚠ este projeto também tem a skill do agente "${marcadorOutro}" em ${outroDir}/skills/onp-spec-driven — o Cursor lê esse diretório também e pode carregar a skill errada.\n` +
+              `  Se este projeto é do Cursor, remova a outra: rm -rf ${outroDir}/skills/onp-spec-driven`
+          );
+        }
+      }
     }
   }
 
@@ -336,11 +368,17 @@ function detectarAgente(rootDir, flag) {
   if (AGENTES.includes(marcadorProprio)) return { agent: marcadorProprio };
   const segmentos = __dirname.split(path.sep);
   if (segmentos.includes('.codex')) return { agent: 'codex' };
+  // só .cursor/skills conta: ~/.cursor/worktrees/<repo> é um checkout comum
+  // dos agentes paralelos do Cursor, não uma instalação da skill
+  const iCursor = segmentos.indexOf('.cursor');
+  if (iCursor !== -1 && segmentos[iCursor + 1] === 'skills') return { agent: 'cursor' };
   if (segmentos.includes('.agents')) return { agent: 'antigravity' };
   if (segmentos.includes('.claude')) return { agent: 'claude' };
   const temClaude = existsSync(path.join(rootDir, '.claude', 'skills', 'onp-spec-driven'));
   const marcadorProjeto = skillAgentMarker(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
   if (AGENTES.includes(marcadorProjeto) && !temClaude) return { agent: marcadorProjeto };
+  const marcadorCursor = skillAgentMarker(path.join(rootDir, '.cursor', 'skills', 'onp-spec-driven'));
+  if (AGENTES.includes(marcadorCursor) && !temClaude) return { agent: marcadorCursor };
   const temAg = existsSync(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
   if (temAg && !temClaude) return { agent: 'antigravity' };
   return { agent: 'claude' };
@@ -440,7 +478,7 @@ function cmdStreamResumo(positional) {
 function cmdPlano(project, positional, flags) {
   const featureName = positional[0];
   if (!featureName) {
-    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity|codex] [--paralelizar T-xxx,T-yyy] [--sequencial]');
+    console.error('uso: onp-spec plano <feature> [--agents claude|antigravity|codex|cursor] [--paralelizar T-xxx,T-yyy] [--sequencial]');
     return 2;
   }
   const det = detectarAgente(project.config.rootDir, flags.agents);
@@ -451,6 +489,11 @@ function cmdPlano(project, positional, flags) {
   if (flags.sequencial && flags.paralelizar) {
     console.error('erro: use --paralelizar OU --sequencial — os dois juntos não fazem sentido');
     return 2;
+  }
+  if (det.agent === 'cursor' && typeof flags.esforco === 'string') {
+    console.log(
+      '⚠ o CLI do Cursor não tem flag de esforço — o valor fica registrado no plano, mas o nível vai no slug do modelo (ex.: gpt-5.6-terra-high)'
+    );
   }
   if (flags.modelo === true) {
     console.error('erro: --modelo precisa de um valor (ex.: --modelo gpt-5.6-luna)');
@@ -508,8 +551,9 @@ function cmdPlano(project, positional, flags) {
     console.log(`  · visual (leitura):      ${plan.baseDir}/plano-execucao.html`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
-  // custo é do usuário: no codex, o agente apresenta modelo/esforço por
-  // tarefa e CONFIRMA antes de executar (licença barata torra tokens fácil)
+  // custo é do usuário: no codex e no cursor, o agente apresenta modelo (e
+  // esforço, quando o CLI o aceita) por tarefa e CONFIRMA antes de executar
+  // (licença barata torra tokens fácil)
   if (det.agent === 'codex') {
     console.log('\nmodelos e esforços deste plano — CONFIRME com o usuário antes de executar (os tokens são dele):');
     const todas = [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais];
@@ -517,6 +561,16 @@ function cmdPlano(project, positional, flags) {
     console.log(
       `  quer gastar menos? tudo: onp-spec plano ${featureName} --modelo gpt-5.6-luna --esforco baixo` +
         `\n  por tarefa: onp-spec tarefa ${featureName} T-xxx --modelo <m> --esforco <nível> (e regenere o plano)`
+    );
+  }
+  if (det.agent === 'cursor') {
+    console.log('\nmodelos deste plano — CONFIRME com o usuário antes de executar (os tokens são dele):');
+    const todas = [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais];
+    for (const t of todas) console.log(`  · ${t.id} — ${t.model}`);
+    console.log(
+      '  (esforço no Cursor vai embutido no slug do modelo, ex.: gpt-5.6-terra-high — não existe flag)' +
+        `\n  quer gastar menos? tudo: onp-spec plano ${featureName} --modelo composer (uso incluído nos planos pagos do Cursor)` +
+        `\n  por tarefa: onp-spec tarefa ${featureName} T-xxx --modelo <m> (e regenere o plano)`
     );
   }
   console.log('\npróximo passo:');
