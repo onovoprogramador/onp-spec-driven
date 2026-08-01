@@ -43,6 +43,13 @@ Isso cria a estrutura `.spec/` **e** instala a skill em
 repositório). Abra uma conversa nova: a skill entra sozinha quando o pedido
 casa com ela, ou invoque explicitamente com `$onp-spec-driven`.
 
+> **Seus tokens, sua escolha:** antes de executar qualquer plano, o agente
+> mostra o **modelo e o esforço de cada tarefa** e pergunta se estão dentro da
+> sua licença — você pode manter, travar tudo num modelo mais barato
+> (`onp-spec plano <feature> --modelo gpt-5.6-luna --esforco baixo`), ajustar
+> por tarefa (`onp-spec tarefa <feature> T-xxx --modelo <m> --esforco <nível>`)
+> ou propor o modelo que quiser. Sem a sua confirmação, nada roda.
+
 ### Antigravity
 
 Na **raiz do seu projeto**:

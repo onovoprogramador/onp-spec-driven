@@ -93,6 +93,23 @@ export function montarPlano(project, featureName, opts = {}) {
   const cfg = project.config.paralelo;
   const avisos = [];
 
+  // escolha explícita do usuário para o plano INTEIRO (--modelo/--esforco):
+  // vence tasks.md e config — é assim que quem tem licença apertada trava o
+  // gasto de tokens sem editar arquivo nenhum
+  let esforcoForcado = null;
+  if (opts.esforco != null) {
+    esforcoForcado = normalizarEsforco(opts.esforco);
+    if (!esforcoForcado) {
+      return { erro: `--esforco "${opts.esforco}" desconhecido (aceitos: baixo|medio|alto|xalto|max)` };
+    }
+  }
+  const modeloForcado = opts.modelo || null;
+  if (modeloForcado && agent === 'codex' && ehModeloClaude(modeloForcado)) {
+    return {
+      erro: `--modelo "${modeloForcado}" é um modelo do Claude — este plano é do codex (use um modelo do Codex, ex.: gpt-5.6-terra, gpt-5.6-luna)`,
+    };
+  }
+
   // título dos critérios de aceite, para dar contexto humano nos prompts
   const acTitulo = {};
   for (const f of project.features) {
@@ -110,12 +127,12 @@ export function montarPlano(project, featureName, opts = {}) {
     if (t.status === 'em-andamento') {
       avisos.push(`${t.id} está [em-andamento] — entrou no plano; se já houver trabalho local, commite antes de executar`);
     }
-    const esforcoRaw = t.esforco || cfg.esforco;
+    const esforcoRaw = esforcoForcado || t.esforco || cfg.esforco;
     const esforcoCli = normalizarEsforco(esforcoRaw);
     if (!esforcoCli) {
       avisos.push(`${t.id}: esforço "${esforcoRaw}" desconhecido — usando "medium" (aceitos: baixo|medio|alto|xalto|max)`);
     }
-    let model = t.model || cfg.model;
+    let model = modeloForcado || t.model || cfg.model;
     if (agent === 'codex' && ehModeloClaude(model)) {
       if (t.model) avisos.push(`${t.id}: modelo "${model}" é do Claude — no codex vai rodar com "${MODELO_CODEX}"`);
       model = MODELO_CODEX;
@@ -149,6 +166,8 @@ export function montarPlano(project, featureName, opts = {}) {
       faixas: [],
       ondas: [],
       sequenciais: pendentes,
+      modeloForcado,
+      esforcoForcado,
     });
   }
 
@@ -228,11 +247,13 @@ export function montarPlano(project, featureName, opts = {}) {
     ondas,
     sequenciais,
     paralelizar: selecao,
+    modeloForcado,
+    esforcoForcado,
   });
 }
 
 // campos comuns aos dois modos (paralelo e sequencial)
-function fecharPlano(project, featureName, { agent, opts, cfg, avisos, acTitulo, concluidas, modo, faixas, ondas, sequenciais, paralelizar = null }) {
+function fecharPlano(project, featureName, { agent, opts, cfg, avisos, acTitulo, concluidas, modo, faixas, ondas, sequenciais, paralelizar = null, modeloForcado = null, esforcoForcado = null }) {
   const repoName = path.basename(project.config.rootDir);
   // como invocar o motor a partir da raiz do projeto
   let engine = opts.enginePath || 'onp-spec';
@@ -259,6 +280,8 @@ function fecharPlano(project, featureName, { agent, opts, cfg, avisos, acTitulo,
     ondas,
     sequenciais,
     paralelizar,
+    modeloForcado,
+    esforcoForcado,
     concluidas,
     avisos,
     geradoEm: (opts.now || new Date()).toISOString().slice(0, 16).replace('T', ' '),
@@ -342,6 +365,8 @@ export function renderPlanoJson(plan) {
       agent: plan.agent,
       modo: plan.modo,
       paralelizar: plan.paralelizar || null,
+      modeloForcado: plan.modeloForcado || null,
+      esforcoForcado: plan.esforcoForcado || null,
       geradoEm: plan.geradoEm,
       branchTrabalho: plan.branchTrabalho,
       baseDir: plan.baseDir,
@@ -379,9 +404,12 @@ function tabelaFaixa(plan, fx) {
 
 // flags que reproduzem este plano (para o "regenere com" dos artefatos)
 function flagsRegenerar(plan) {
-  if (plan.modo === 'sequencial') return ' --sequencial';
-  if (plan.paralelizar) return ` --paralelizar ${plan.paralelizar.join(',')}`;
-  return '';
+  let flags = '';
+  if (plan.modo === 'sequencial') flags += ' --sequencial';
+  else if (plan.paralelizar) flags += ` --paralelizar ${plan.paralelizar.join(',')}`;
+  if (plan.modeloForcado) flags += ` --modelo ${plan.modeloForcado}`;
+  if (plan.esforcoForcado) flags += ` --esforco ${plan.esforcoForcado}`;
+  return flags;
 }
 
 export function renderPlanoMd(plan) {
@@ -405,6 +433,12 @@ export function renderPlanoMd(plan) {
     }
     L.push(`- **1 faixa = 1 worktree + 1 branch + 1 janela de contexto limpa** — faixas não compartilham nenhum arquivo entre si`);
     L.push(`- prefere outra seleção ou uma após a outra? Regenere com \`onp-spec plano ${plan.feature} --paralelizar T-xxx,T-yyy\` ou \`--sequencial\``);
+  }
+  if (plan.modeloForcado || plan.esforcoForcado) {
+    const partes = [];
+    if (plan.modeloForcado) partes.push(`modelo \`${plan.modeloForcado}\``);
+    if (plan.esforcoForcado) partes.push(`esforço \`${plan.esforcoForcado}\``);
+    L.push(`- **custo travado pelo usuário**: ${partes.join(' · ')} em TODAS as tarefas (vence tasks.md e config)`);
   }
   L.push(`- tudo acontece na branch de trabalho \`${plan.branchTrabalho}\`; levar para a main é decisão sua`);
   if (plan.avisos.length) {
@@ -475,6 +509,14 @@ export function renderPlanoMd(plan) {
       L.push('embutidos no script — quer rodar uma faixa na mão, é só copiá-los de lá.');
     }
     L.push(`Logs: \`../onp-worktrees/${plan.repoName}-${plan.feature}-logs/\`.`);
+    if (codex) {
+      L.push('');
+      L.push('**Confirmação de custos — antes de executar**: os modelos e esforços por');
+      L.push('tarefa estão nas tabelas acima; o agente CONFIRMA com o usuário se estão');
+      L.push('dentro da licença/cota dele (modelo forte + esforço alto torra tokens).');
+      L.push(`Para gastar menos: \`onp-spec plano ${plan.feature} --modelo gpt-5.6-luna --esforco baixo\``);
+      L.push(`(tudo) ou por tarefa \`onp-spec tarefa ${plan.feature} T-xxx --modelo <m> --esforco <nível>\` — e regenere o plano.`);
+    }
     L.push('');
     L.push('### 📣 Acompanhamento — tabela + resumo no chat (a cada 1 min)');
     L.push('');

@@ -10,6 +10,7 @@ import {
   renderPlanoHtml,
   renderPlanoJson,
   usaExecutorSh,
+  normalizarEsforco,
   AGENTES,
 } from './core/plano.js';
 import { registrarEvento, podarLedger, lerStream, lerEventos, montarArvore } from './core/ledger.js';
@@ -92,7 +93,7 @@ comandos:
                       (--agents também instala a skill do agente escolhido)
   new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
   plano <feature> [--agents claude|antigravity|codex] [--paralelizar T-xxx,T-yyy]
-                  [--sequencial]
+                  [--sequencial] [--modelo <modelo>] [--esforco <nível>]
                       plano de execução. Default: agrupa tarefas em faixas
                       PARALELAS (arquivos disjuntos → 1 worktree + 1 branch +
                       1 janela limpa por faixa). Com --paralelizar: só as
@@ -111,6 +112,10 @@ comandos:
                         tarefa) + plano-execucao.html (visual)
                       · antigravity: prompts prontos p/ os agentes nativos
                         (não depende de CLI nenhum)
+                      Custo é escolha do USUÁRIO: --modelo/--esforco travam
+                      modelo e esforço de TODAS as tarefas (vencem tasks.md e
+                      config) — o agente confirma modelos/esforços com o
+                      usuário ANTES de executar
   resumo [feature] [--tabela] [--global] [--run <runId>]
          [--gravar [--texto "..."] [--origem ia|motor]]
                       o RESUMO GERAL DE ANDAMENTO em texto: o que está
@@ -121,9 +126,11 @@ comandos:
                       última ação) — pronta para colar no chat junto com o
                       texto. --gravar registra no ledger (com --texto, é a
                       IA/agente escrevendo; sem, vale o do motor).
-  tarefa <feature> <T-xxx> <status>
-                      atualiza o status da tarefa no tasks.md
-                      (pendente | em-andamento | concluida)
+  tarefa <feature> <T-xxx> [status] [--modelo <modelo>] [--esforco <nível>]
+                      atualiza a tarefa no tasks.md: status (pendente |
+                      em-andamento | concluida) e/ou o custo dela (--modelo e
+                      --esforco definem Modelo:/Esforço: — regenere o plano
+                      depois)
   audit [--ci] [--json] [--md <arquivo>]
                       audita especificação ↔ tarefas ↔ testes ↔ código ↔ constituição
                       exit 1 se houver erro (use no CI)
@@ -339,8 +346,15 @@ function detectarAgente(rootDir, flag) {
   return { agent: 'claude' };
 }
 
-function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, paralelizar } = {}) {
-  const plan = montarPlano(project, featureName, { agent, sequencial, paralelizar, enginePath: process.argv[1] });
+function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, paralelizar, modelo, esforco } = {}) {
+  const plan = montarPlano(project, featureName, {
+    agent,
+    sequencial,
+    paralelizar,
+    modelo,
+    esforco,
+    enginePath: process.argv[1],
+  });
   if (plan.erro) return plan;
   const dir = path.join(project.config.rootDir, plan.baseDir);
   writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
@@ -438,6 +452,14 @@ function cmdPlano(project, positional, flags) {
     console.error('erro: use --paralelizar OU --sequencial — os dois juntos não fazem sentido');
     return 2;
   }
+  if (flags.modelo === true) {
+    console.error('erro: --modelo precisa de um valor (ex.: --modelo gpt-5.6-luna)');
+    return 2;
+  }
+  if (flags.esforco === true) {
+    console.error('erro: --esforco precisa de um valor (baixo|medio|alto|xalto|max)');
+    return 2;
+  }
   const paralelizar =
     flags.paralelizar === undefined
       ? undefined
@@ -450,6 +472,8 @@ function cmdPlano(project, positional, flags) {
   const plan = gerarArtefatosPlano(project, featureName, det.agent, {
     sequencial: Boolean(flags.sequencial),
     paralelizar,
+    modelo: typeof flags.modelo === 'string' ? flags.modelo : undefined,
+    esforco: typeof flags.esforco === 'string' ? flags.esforco : undefined,
   });
   if (plan.erro) {
     console.error(`erro: ${plan.erro}`);
@@ -484,6 +508,17 @@ function cmdPlano(project, positional, flags) {
     console.log(`  · visual (leitura):      ${plan.baseDir}/plano-execucao.html`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
+  // custo é do usuário: no codex, o agente apresenta modelo/esforço por
+  // tarefa e CONFIRMA antes de executar (licença barata torra tokens fácil)
+  if (det.agent === 'codex') {
+    console.log('\nmodelos e esforços deste plano — CONFIRME com o usuário antes de executar (os tokens são dele):');
+    const todas = [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais];
+    for (const t of todas) console.log(`  · ${t.id} — ${t.model} · esforço ${t.esforcoCli}`);
+    console.log(
+      `  quer gastar menos? tudo: onp-spec plano ${featureName} --modelo gpt-5.6-luna --esforco baixo` +
+        `\n  por tarefa: onp-spec tarefa ${featureName} T-xxx --modelo <m> --esforco <nível> (e regenere o plano)`
+    );
+  }
   console.log('\npróximo passo:');
   if (usaExecutorSh(plan.agent)) {
     console.log(`  · executar: bash ${plan.baseDir}/executar-tarefas.sh`);
@@ -538,15 +573,57 @@ function cmdResumo(config, positional, flags) {
   return 0;
 }
 
-function cmdTarefa(config, positional) {
+// insere ou substitui um campo de lista (- Modelo:/- Esforço:) dentro da
+// seção da tarefa em tasks.md — no MESMO formato que o parser lê; é assim
+// que o usuário ajusta o custo por tarefa sem editar arquivo na mão
+function definirCampoTarefa(linhas, taskId, matcher, rotulo, valor) {
+  const reTitulo = new RegExp(`^##\\s+${taskId}\\s*${DASH}\\s*`);
+  const inicio = linhas.findIndex((l) => reTitulo.test(l));
+  if (inicio === -1) return false;
+  let fim = linhas.length;
+  for (let i = inicio + 1; i < linhas.length; i++) {
+    if (/^##\s+/.test(linhas[i])) {
+      fim = i;
+      break;
+    }
+  }
+  const reCampo = new RegExp(`^\\s*[-*]\\s*${matcher}\\s*:`, 'i');
+  for (let i = inicio + 1; i < fim; i++) {
+    if (reCampo.test(linhas[i])) {
+      linhas[i] = `- ${rotulo}: ${valor}`;
+      return true;
+    }
+  }
+  // campo ainda não existe: entra depois da última linha de lista da seção
+  let pos = inicio;
+  for (let i = inicio + 1; i < fim; i++) {
+    if (/^\s*[-*]\s/.test(linhas[i])) pos = i;
+  }
+  if (pos === inicio) linhas.splice(inicio + 1, 0, '', `- ${rotulo}: ${valor}`);
+  else linhas.splice(pos + 1, 0, `- ${rotulo}: ${valor}`);
+  return true;
+}
+
+function cmdTarefa(config, positional, flags = {}) {
   const [featureName, taskId, statusRaw] = positional;
-  if (!featureName || !taskId || !statusRaw) {
-    console.error('uso: onp-spec tarefa <feature> <T-xxx> <pendente|em-andamento|concluida>');
+  const modelo = typeof flags.modelo === 'string' ? flags.modelo : null;
+  const esforcoRaw = typeof flags.esforco === 'string' ? flags.esforco : null;
+  const USO =
+    'uso: onp-spec tarefa <feature> <T-xxx> [pendente|em-andamento|concluida] [--modelo <modelo>] [--esforco baixo|medio|alto|xalto|max]';
+  if (!featureName || !taskId || (!statusRaw && !modelo && !esforcoRaw) || flags.modelo === true || flags.esforco === true) {
+    console.error(USO);
     return 2;
   }
-  const status = foldStatus(statusRaw);
-  if (!TASK_STATUSES.includes(status)) {
-    console.error(`status inválido: "${statusRaw}" (use: ${TASK_STATUSES.join(', ')})`);
+  let status = null;
+  if (statusRaw) {
+    status = foldStatus(statusRaw);
+    if (!TASK_STATUSES.includes(status)) {
+      console.error(`status inválido: "${statusRaw}" (use: ${TASK_STATUSES.join(', ')})`);
+      return 2;
+    }
+  }
+  if (esforcoRaw && !normalizarEsforco(esforcoRaw)) {
+    console.error(`esforço inválido: "${esforcoRaw}" (use: baixo|medio|alto|xalto|max)`);
     return 2;
   }
   const tasksPath = path.join(config.rootDir, config.specDir, 'features', featureName, 'tasks.md');
@@ -554,14 +631,34 @@ function cmdTarefa(config, positional) {
     console.error(`não achei ${config.specDir}/features/${featureName}/tasks.md`);
     return 2;
   }
-  const conteudo = readFileSync(tasksPath, 'utf-8');
+  let conteudo = readFileSync(tasksPath, 'utf-8');
   const re = new RegExp(`^(##\\s+${taskId}\\s*${DASH}\\s*.*?)(\\s*\\[[^\\]]+\\])?\\s*$`, 'm');
   if (!re.test(conteudo)) {
     console.error(`tarefa ${taskId} não encontrada em ${config.specDir}/features/${featureName}/tasks.md`);
     return 2;
   }
-  writeFileSync(tasksPath, conteudo.replace(re, `$1 [${status}]`));
-  console.log(`✔ ${taskId} → [${status}] em ${config.specDir}/features/${featureName}/tasks.md`);
+  const mudancas = [];
+  if (status) {
+    conteudo = conteudo.replace(re, `$1 [${status}]`);
+    mudancas.push(`→ [${status}]`);
+  }
+  if (modelo || esforcoRaw) {
+    const linhas = conteudo.split('\n');
+    if (modelo) {
+      definirCampoTarefa(linhas, taskId, 'Modelo', 'Modelo', modelo);
+      mudancas.push(`Modelo: ${modelo}`);
+    }
+    if (esforcoRaw) {
+      definirCampoTarefa(linhas, taskId, 'Esfor[cç]o', 'Esforço', esforcoRaw);
+      mudancas.push(`Esforço: ${esforcoRaw}`);
+    }
+    conteudo = linhas.join('\n');
+  }
+  writeFileSync(tasksPath, conteudo);
+  console.log(`✔ ${taskId} ${mudancas.join(' · ')} em ${config.specDir}/features/${featureName}/tasks.md`);
+  if (modelo || esforcoRaw) {
+    console.log(`· modelo/esforço mudou — regenere o plano: onp-spec plano ${featureName}`);
+  }
   return 0;
 }
 
@@ -806,8 +903,8 @@ export async function run(argv) {
   // lições não precisam do projeto carregado — em repos grandes, listar o
   // guia no início do Especificar tem que ser barato
   if (command === 'licoes') return cmdLicoes(config, positional, flags);
-  // tarefa idem: edição pontual de status no tasks.md (usada pelo executor)
-  if (command === 'tarefa') return cmdTarefa(config, positional);
+  // tarefa idem: edição pontual de status/modelo/esforço no tasks.md
+  if (command === 'tarefa') return cmdTarefa(config, positional, flags);
   // comandos internos do executar-tarefas.sh (alimentam/leem o ledger global)
   if (command === 'evento') return cmdEvento(flags);
   if (command === 'stream-resumo') return cmdStreamResumo(positional);

@@ -214,7 +214,16 @@ auto-detecção pelo caminho do motor embarcado ou pela skill instalada):
   (`gpt-5.6-luna` quando `paralelo.resumoModel` ainda é um `claude-*`); o
   default de modelo por tarefa vira `gpt-5.6-terra` quando `paralelo.model`
   é um `claude-*` (um `Modelo: claude-*` explícito no tasks.md é trocado com
-  aviso). Nunca depende do CLI do Claude.
+  aviso; `--modelo claude-*` na flag é ERRO). Nunca depende do CLI do Claude.
+
+  **Custo é escolha do usuário**: o `plano` do codex imprime "modelos e
+  esforços deste plano" (linha por tarefa) e a skill obriga o agente a
+  CONFIRMAR com o usuário antes de executar. `--modelo <m>`/`--esforco <n>`
+  no `plano` travam TODAS as tarefas (vencem tasks.md e config; entram em
+  `modeloForcado`/`esforcoForcado` no plano.json e no "regenere com");
+  `onp-spec tarefa <feature> <T-xxx> [status] [--modelo <m>] [--esforco <n>]`
+  grava `- Modelo:`/`- Esforço:` na seção da tarefa no tasks.md (substitui se
+  existir, insere se não) para ajuste por tarefa.
 - **antigravity**: o md ganha comandos de worktree e um prompt pronto por
   faixa para os agentes paralelos nativos — nunca depende de CLI nenhum.
 

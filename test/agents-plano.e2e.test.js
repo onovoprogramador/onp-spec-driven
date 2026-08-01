@@ -296,6 +296,66 @@ test('tarefa atualiza o status no tasks.md (e valida entrada)', () => {
   assert.equal(cli('tarefa', 'pagamentos', 'T-001', 'meio-feita').code, 2);
 });
 
+test('tarefa --modelo/--esforco: o usuário ajusta o custo por tarefa sem editar arquivo', () => {
+  const tasksPath = path.join(root, '.spec', 'features', 'pagamentos', 'tasks.md');
+  // insere os campos numa tarefa que não os tinha
+  const r = cli('tarefa', 'pagamentos', 'T-001', '--modelo', 'gpt-5.6-luna', '--esforco', 'baixo');
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Modelo: gpt-5\.6-luna/);
+  assert.match(r.out, /regenere o plano/);
+  const tasks = readFileSync(tasksPath, 'utf-8');
+  const secaoT001 = tasks.slice(tasks.indexOf('## T-001'), tasks.indexOf('## T-002'));
+  assert.match(secaoT001, /- Modelo: gpt-5\.6-luna/);
+  assert.match(secaoT001, /- Esforço: baixo/);
+
+  // substitui um campo que já existia (T-002 tinha Modelo: claude-opus-5)
+  const r2 = cli('tarefa', 'pagamentos', 'T-002', '--modelo', 'gpt-5.6-terra');
+  assert.equal(r2.code, 0, r2.out);
+  const secaoT002 = readFileSync(tasksPath, 'utf-8').slice(
+    readFileSync(tasksPath, 'utf-8').indexOf('## T-002'),
+    readFileSync(tasksPath, 'utf-8').indexOf('## T-003')
+  );
+  assert.match(secaoT002, /- Modelo: gpt-5\.6-terra/);
+  assert.doesNotMatch(secaoT002, /claude-opus-5/, 'o campo antigo foi substituído, não duplicado');
+
+  // esforço inválido é barrado alto
+  const r3 = cli('tarefa', 'pagamentos', 'T-001', '--esforco', 'turbo');
+  assert.equal(r3.code, 2);
+  assert.match(r3.out, /esforço inválido/);
+
+  // o plano regenerado usa a escolha do usuário (e o parser leu o que gravamos)
+  const p = cli('plano', 'pagamentos', '--agents', 'codex');
+  assert.equal(p.code, 0, p.out);
+  assert.match(p.out, /T-001 — gpt-5\.6-luna · esforço low/);
+  const sh = readFileSync(path.join(root, '.spec', 'features', 'pagamentos', 'executar-tarefas.sh'), 'utf-8');
+  assert.match(sh, /rodar_tarefa 'faixa-1' 'T-001' '[\s\S]*?' 'gpt-5.6-luna' low/);
+});
+
+test('plano (codex) imprime a lista de custos e --modelo/--esforco travam tudo', () => {
+  // a lista que o agente apresenta ao usuário para confirmação
+  const semTrava = cli('plano', 'pagamentos', '--agents', 'codex');
+  assert.match(semTrava.out, /CONFIRME com o usuário antes de executar/);
+  assert.match(semTrava.out, /quer gastar menos\?/);
+
+  // o usuário travou: tudo luna/low, vencendo o que estiver no tasks.md
+  const { code, out } = cli('plano', 'pagamentos', '--agents', 'codex', '--modelo', 'gpt-5.6-luna', '--esforco', 'baixo');
+  assert.equal(code, 0, out);
+  assert.match(out, /T-001 — gpt-5\.6-luna · esforço low/);
+  assert.match(out, /T-003 — gpt-5\.6-luna · esforço low/);
+  const planoJson = JSON.parse(
+    readFileSync(path.join(root, '.spec', 'features', 'pagamentos', 'plano.json'), 'utf-8')
+  );
+  assert.equal(planoJson.modeloForcado, 'gpt-5.6-luna');
+  assert.equal(planoJson.esforcoForcado, 'low');
+  const md = readFileSync(path.join(root, '.spec', 'features', 'pagamentos', 'plano-execucao.md'), 'utf-8');
+  assert.match(md, /custo travado pelo usuário/);
+
+  // modelo do claude num plano do codex é erro, não troca silenciosa
+  const errado = cli('plano', 'pagamentos', '--agents', 'codex', '--modelo', 'claude-opus-5');
+  assert.equal(errado.code, 2);
+  assert.match(errado.out, /é um modelo do Claude/);
+});
+
 test('upgrade: plano de versão anterior (sem runId) é registrado no ledger em vez de sumir', () => {
   const planoPath = path.join(root, '.spec', 'features', 'pagamentos', 'plano.json');
   // simula o artefato de uma versão que não tinha ledger

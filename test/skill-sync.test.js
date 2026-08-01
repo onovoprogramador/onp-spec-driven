@@ -88,3 +88,15 @@ test('SKILL.md: contrato e degradação graciosa presentes nas três skills', ()
     assert.match(conteudo, /audit --ci` sai com código 0/, `${skill}: gate do audit sumiu`);
   }
 });
+
+// No codex, custo é escolha do usuário: a skill NUNCA pode perder o gate de
+// confirmação de modelos/esforços antes de executar (licença barata torra
+// tokens com modelo forte + esforço alto).
+test('SKILL.md (codex): gate de confirmação de modelos e esforços presente', () => {
+  const conteudo = readFileSync(path.join(ROOT, 'skills', 'onp-spec-driven-codex', 'SKILL.md'), 'utf-8');
+  assert.match(conteudo, /MODELO e ESFORÇO são escolha do USUÁRIO — confirme ANTES de\s+executar/);
+  assert.match(conteudo, /Sem essa confirmação,\s+não execute/);
+  assert.match(conteudo, /Nunca\s+aumente modelo\/esforço sem o usuário pedir/);
+  assert.match(conteudo, /--modelo gpt-5\.6-luna --esforco baixo/);
+  assert.match(conteudo, /onp-spec tarefa <feature> <T-xxx> --modelo/);
+});

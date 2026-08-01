@@ -339,7 +339,54 @@ test('codex: modelo claude-* da config vira gpt-5.6-terra; Modelo: explícito de
   assert.equal(f3.tasks[0].esforcoCli, 'high');
 });
 
-test('md (codex): seção codex exec, sandbox, mesmo acompanhamento — sem claude -p', () => {
+test('--modelo/--esforco: o usuário trava o custo do plano inteiro (vence tasks.md e config)', () => {
+  const plan = montarPlano(
+    projeto({
+      tasks: [
+        t('T-001', { files: ['a'], line: 1, model: 'gpt-5.6-sol', esforco: 'xalto' }), // por-tarefa perde p/ escolha do usuário
+        t('T-002', { files: ['b'], line: 5 }),
+        t('T-003', { line: 9 }),
+      ],
+    }),
+    'pagamentos',
+    { agent: 'codex', modelo: 'gpt-5.6-luna', esforco: 'baixo', enginePath: '/tmp/repo-x/bin/onp-spec.js' }
+  );
+  assert.ok(!plan.erro, plan.erro);
+  assert.equal(plan.modeloForcado, 'gpt-5.6-luna');
+  assert.equal(plan.esforcoForcado, 'low');
+  for (const tarefa of [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais]) {
+    assert.equal(tarefa.model, 'gpt-5.6-luna', `${tarefa.id} deveria usar o modelo travado`);
+    assert.equal(tarefa.esforcoCli, 'low', `${tarefa.id} deveria usar o esforço travado`);
+  }
+  // aparece nos artefatos: md (resumo + regenere), json e sh
+  const md = renderPlanoMd(plan);
+  assert.match(md, /custo travado pelo usuário.*gpt-5\.6-luna.*low/);
+  assert.match(md, /Regenere: `onp-spec plano pagamentos --modelo gpt-5.6-luna --esforco low`/);
+  const dados = JSON.parse(renderPlanoJson(plan));
+  assert.equal(dados.modeloForcado, 'gpt-5.6-luna');
+  assert.equal(dados.esforcoForcado, 'low');
+  const sh = renderPlanoSh(plan);
+  assert.match(sh, /rodar_tarefa 'faixa-1' 'T-001' '[\s\S]*?' 'gpt-5.6-luna' low/);
+});
+
+test('--modelo/--esforco: valores inválidos são erro amigável, nunca execução silenciosa', () => {
+  const proj = () => projeto({ tasks: [t('T-001', { files: ['a'] })] });
+  assert.match(
+    montarPlano(proj(), 'pagamentos', { agent: 'codex', esforco: 'turbo' }).erro,
+    /--esforco "turbo" desconhecido/
+  );
+  assert.match(
+    montarPlano(proj(), 'pagamentos', { agent: 'codex', modelo: 'claude-opus-5' }).erro,
+    /é um modelo do Claude/,
+    'forçar modelo do claude num plano do codex é erro, não troca silenciosa'
+  );
+  // no claude, --modelo claude-* é legítimo
+  const claude = montarPlano(proj(), 'pagamentos', { agent: 'claude', modelo: 'claude-opus-5' });
+  assert.ok(!claude.erro, claude.erro);
+  assert.equal(claude.faixas[0].tasks[0].model, 'claude-opus-5');
+});
+
+test('md (codex): seção codex exec, sandbox, confirmação de custos — sem claude -p', () => {
   const md = renderPlanoMd(planPadrao('codex'));
   assert.match(md, /Execução — Codex headless \(codex exec\)/);
   assert.match(md, /executar-tarefas\.sh/);
@@ -350,6 +397,12 @@ test('md (codex): seção codex exec, sandbox, mesmo acompanhamento — sem clau
   assert.match(md, /onp-spec resumo pagamentos/);
   assert.match(md, /audit --ci/);
   assert.doesNotMatch(md, /claude -p/, 'plano do codex não pode depender do CLI do Claude');
+  // a confirmação de custos é parte do artefato — o agente não executa sem ela
+  assert.match(md, /Confirmação de custos — antes de executar/);
+  assert.match(md, /--modelo gpt-5\.6-luna --esforco baixo/);
+  assert.match(md, /onp-spec tarefa pagamentos T-xxx --modelo/);
+  // no claude, nada disso: comportamento intocado
+  assert.doesNotMatch(renderPlanoMd(planPadrao('claude')), /Confirmação de custos/);
 });
 
 test('sh (codex): codex exec com --model e model_reasoning_effort por tarefa, --json, sandbox e --add-dir', () => {

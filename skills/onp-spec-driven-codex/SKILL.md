@@ -1,6 +1,6 @@
 ---
 name: onp-spec-driven
-description: Desenvolvimento spec-anchored nativo para Codex — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas". Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição verificável (preset LGPD/educação), lições aprendidas com lastro mecânico e plano de execução com PARALELISMO OPCIONAL: o agente apresenta o plano recomendado e SEMPRE pergunta QUAIS tarefas o usuário quer paralelizar (faixas com git worktrees + sessões headless `codex exec` via --paralelizar, ou uma tarefa após a outra via --sequencial), avisa que a execução roda em background e, durante ela, posta no chat a cada 1 minuto a tabela de andamento (o que está rodando e o que não está) + resumo geral — com resumo completo ao final. Integração com os recursos nativos do Codex (plano visível, /plan, /goal, /review, invocação explícita com $onp-spec-driven). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente).
+description: Desenvolvimento spec-anchored nativo para Codex — a especificação continua verdadeira porque é auditada mecanicamente contra o código. Use ao planejar features, implementar com verificação, ou auditar uma implementação contra a spec. Gatilhos "especificar feature", "nova feature", "implementar", "auditar spec", "verificar", "plano de execução", "executar em paralelo", "o que não tem teste", "lições aprendidas". Fluxo Especificar → Projetar → Tarefas → Plano → Executar → Auditar → Aprender, com rastreabilidade história→critério de aceite→tarefa→teste, definição de pronto executável (cada critério de aceite vira teste anotado), suposições e perguntas como cidadãs de primeira classe, constituição verificável (preset LGPD/educação), lições aprendidas com lastro mecânico e plano de execução com PARALELISMO OPCIONAL: o agente apresenta o plano recomendado e SEMPRE pergunta QUAIS tarefas o usuário quer paralelizar (faixas com git worktrees + sessões headless `codex exec` via --paralelizar, ou uma tarefa após a outra via --sequencial) e SEMPRE confirma os MODELOS e ESFORÇOS por tarefa antes de executar — os tokens e a licença são do usuário; ele trava o custo com --modelo/--esforco no plano ou por tarefa via `onp-spec tarefa`. Avisa que a execução roda em background e, durante ela, posta no chat a cada 1 minuto a tabela de andamento (o que está rodando e o que não está) + resumo geral — com resumo completo ao final. Integração com os recursos nativos do Codex (plano visível, /plan, /goal, /review, invocação explícita com $onp-spec-driven). Motor mecânico EMBARCADO na skill (zero instalação — roda com o node do ambiente).
 license: MIT
 metadata:
   author: Vitor Manoel — O Novo Programador
@@ -177,7 +177,10 @@ assumiu) ou uma pergunta em aberto (precisa do dono do produto).
   critério de outra feature) e `Arquivos:` (separados por VÍRGULA; espaços em
   caminhos são permitidos). Campos opcionais por tarefa: `Modelo:` (um modelo
   do Codex, ex.: `gpt-5.6-terra`) e `Esforço:` (baixo|medio|alto|xalto — o
-  plano converte para `model_reasoning_effort`).
+  plano converte para `model_reasoning_effort`). Modelo e esforço são
+  **propostas suas** — quem bate o martelo é o usuário, na confirmação de
+  custos da fase Plano; para ajustar sem editar arquivo:
+  `onp-spec tarefa <feature> <T-xxx> --modelo <m> --esforco <nível>`.
 - Status entre colchetes: `[pendente]`, `[em-andamento]`, `[concluida]`
   (acentos e maiúsculas são tolerados; token desconhecido é erro).
 - **Fechou o tasks.md? Anuncie o paralelismo e PERGUNTE QUAIS.** Rode
@@ -198,6 +201,18 @@ assumiu) ou uma pergunta em aberto (precisa do dono do produto).
   regenere com `onp-spec plano <feature> --paralelizar T-xxx,T-yyy` e
   execute esse. Escolheu nenhuma → regenere com `--sequencial`. Sem
   resposta, não execute.
+- **MODELO e ESFORÇO são escolha do USUÁRIO — confirme ANTES de executar.**
+  Os tokens e a licença são dele (quem tem plano barato torra a cota com
+  modelo forte + esforço alto). O `onp-spec plano` já imprime a lista
+  "modelos e esforços deste plano" (uma linha por tarefa: modelo · esforço)
+  — apresente-a e pergunte, com opções concretas: **(a)** manter como está
+  (a recomendação); **(b)** economizar em tudo — regenere com
+  `onp-spec plano <feature> --modelo gpt-5.6-luna --esforco baixo` (os dois
+  travam TODAS as tarefas e vencem tasks.md e config); **(c)** ajustar por
+  tarefa — `onp-spec tarefa <feature> <T-xxx> --modelo <m> --esforco
+  <nível>` e regenere o plano; **(d)** o modelo que ELE propuser — use o que
+  o usuário pedir, sem discutir. Sem essa confirmação, não execute. Nunca
+  aumente modelo/esforço sem o usuário pedir.
 - `onp-spec plano <feature>` (se a detecção errar, force com
   `--agents codex`) agrupa tarefas de **arquivos disjuntos** em **faixas
   paralelas** — 1 faixa = 1 git worktree + 1 branch + 1 janela de contexto
@@ -218,10 +233,11 @@ assumiu) ou uma pergunta em aberto (precisa do dono do produto).
   (VOCÊ roda `bash .spec/features/<feature>/executar-tarefas.sh` num
   terminal em segundo plano) ou manual (você mesmo implementa, seguindo
   branches e commits do plano).
-- **Antes de executar, AVISE — sempre**: diga ao usuário, em uma frase, que
-  as alterações vão rodar em **background**, que a cada 1 minuto você posta
-  aqui a **tabela de andamento**, e que ao final ele recebe o **resumo
-  completo** da execução. Só então rode o script.
+- **Antes de executar, AVISE — sempre**: com paralelismo e custos já
+  confirmados, diga ao usuário, em uma frase, que as alterações vão rodar em
+  **background**, que a cada 1 minuto você posta aqui a **tabela de
+  andamento**, e que ao final ele recebe o **resumo completo** da execução.
+  Só então rode o script.
 - **Tabela + resumo a cada 1 minuto (obrigatórios enquanto roda)**: com o
   script em background, a cada ~1 min poste no chat a **tabela de
   andamento** (`onp-spec resumo <feature> --tabela` — uma linha por tarefa:
@@ -330,6 +346,10 @@ especificação sem história (`SPEC_SEM_US`), critério fora de história
 - **"O que estamos assumindo?"** → `onp-spec assumptions`.
 - **"O que dá pra fazer em paralelo?"** → `onp-spec plano <feature>` — e
   QUAIS tarefas paralelizar é escolha do usuário, via pergunta no chat.
+- **"Dá pra rodar mais barato?"** → `onp-spec plano <feature> --modelo
+  gpt-5.6-luna --esforco baixo` (tudo) ou `onp-spec tarefa <feature> <T-xxx>
+  --modelo <m> --esforco <nível>` (por tarefa, e regenere o plano) — modelos
+  e esforços SEMPRE passam pela confirmação do usuário antes de executar.
 - **"O que está rolando agora?"** → `onp-spec resumo <feature> --tabela` (a
   tabela de andamento) + `onp-spec resumo <feature>` (o texto); poste os
   dois no chat a cada ~1 min enquanto houver execução.
