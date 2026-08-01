@@ -16,85 +16,109 @@ máquina acusa.
 
 A skill é **autossuficiente**: o motor mecânico já vem embarcado dentro dela
 (zero dependências — só precisa de Node.js ≥ 18 no ambiente, que seu agente já
-usa). Instalar é colocar uma pasta no lugar certo. Escolha o seu agente:
+usa). Instalar é colocar uma pasta no lugar certo — e o comando abaixo faz
+isso por você. Escolha o seu agente:
 
 ### Claude Code
 
-Na **raiz do seu projeto**:
+Na **raiz do seu projeto**, rode:
 
 ```bash
 npx @onovoprogramador/onp-spec init --agents claude
 ```
 
-Pronto: isso cria a estrutura `.spec/` do projeto **e** instala a skill em
-`.claude/skills/onp-spec-driven/`. Abra uma conversa nova no Claude Code e a
-skill já está ativa.
+O comando faz duas coisas:
+
+1. cria a estrutura `.spec/` do projeto (constituição de princípios + arquivo
+   de configuração — ambos editáveis, com defaults prontos);
+2. instala a skill em `.claude/skills/onp-spec-driven/` — o diretório de
+   skills que o Claude Code lê neste projeto.
+
+**Para ativar:** abra uma conversa nova no Claude Code. A skill entra sozinha
+quando o pedido casa com ela ("especifica a feature X", "audita contra a
+spec"...).
 
 ### Codex
 
-Na **raiz do seu projeto**:
+Na **raiz do seu projeto**, rode:
 
 ```bash
 npx @onovoprogramador/onp-spec init --agents codex
 ```
 
-Isso cria a estrutura `.spec/` **e** instala a skill em
-`.agents/skills/onp-spec-driven/` (o diretório de skills que o Codex lê no
-repositório). Abra uma conversa nova: a skill entra sozinha quando o pedido
-casa com ela, ou invoque explicitamente com `$onp-spec-driven`.
+O comando faz duas coisas:
+
+1. cria a estrutura `.spec/` do projeto;
+2. instala a skill em `.agents/skills/onp-spec-driven/` — o diretório de
+   skills que o Codex lê no repositório.
+
+**Para ativar:** abra uma conversa nova. A skill entra sozinha quando o
+pedido casa com ela, ou invoque explicitamente com `$onp-spec-driven`.
 
 > **Seus tokens, sua escolha:** antes de executar qualquer plano, o agente
-> mostra o **modelo e o esforço de cada tarefa** e pergunta se estão dentro da
-> sua licença — você pode manter, travar tudo num modelo mais barato
-> (`onp-spec plano <feature> --modelo gpt-5.6-luna --esforco baixo`), ajustar
-> por tarefa (`onp-spec tarefa <feature> T-xxx --modelo <m> --esforco <nível>`)
-> ou propor o modelo que quiser. Sem a sua confirmação, nada roda.
+> mostra o **modelo e o esforço de cada tarefa** e pergunta se estão dentro
+> da sua licença. Você responde na conversa: manter, economizar em tudo,
+> ajustar uma tarefa específica ou propor o modelo que quiser — o agente
+> ajusta o plano por você. Sem a sua confirmação, nada roda.
 
 ### Cursor
 
-Na **raiz do seu projeto**:
+Na **raiz do seu projeto**, rode:
 
 ```bash
 npx @onovoprogramador/onp-spec init --agents cursor
 ```
 
-Isso cria a estrutura `.spec/` **e** instala a skill em
-`.cursor/skills/onp-spec-driven/` (o Cursor suporta Agent Skills nativamente
-desde o 2.4, no editor e no CLI). Abra uma conversa nova: a skill entra
-sozinha quando o pedido casa com ela, ou invoque explicitamente digitando
-`/onp-spec-driven` no chat do Agent.
+O comando faz duas coisas:
+
+1. cria a estrutura `.spec/` do projeto;
+2. instala a skill em `.cursor/skills/onp-spec-driven/` — o Cursor suporta
+   Agent Skills nativamente desde o 2.4, no editor e no CLI.
+
+**Para ativar:** abra uma conversa nova. A skill entra sozinha quando o
+pedido casa com ela, ou invoque explicitamente digitando `/onp-spec-driven`
+no chat do Agent.
+
+**Para a execução paralela automática**, o executor usa o CLI do Cursor em
+modo headless. Se ainda não o tem, instale e faça login:
+
+```bash
+curl https://cursor.com/install -fsS | bash
+agent login
+```
+
+Sem o CLI, o plano continua funcionando na rota manual: os prompts de cada
+faixa vêm prontos para você colar nos agentes paralelos da Agents Window.
 
 > **Seus tokens, sua escolha:** no Cursor, modelos `claude-*`/`gpt-*` são
 > cobrados por uso e o `composer` (modelo da casa) tem uso incluído nos
-> planos pagos. Antes de executar qualquer plano, o agente mostra o **modelo
-> de cada tarefa** e pergunta se está dentro do seu plano — você pode manter,
-> travar tudo no modelo incluído (`onp-spec plano <feature> --modelo
-> composer`), ajustar por tarefa (`onp-spec tarefa <feature> T-xxx --modelo
-> <m>`) ou propor o modelo que quiser. Sem a sua confirmação, nada roda.
-> Esforço de raciocínio no Cursor vai embutido no slug do modelo (ex.:
-> `gpt-5.6-terra-high`) — não existe flag.
-
-> **Para a execução paralela automática**, o executor usa o CLI do Cursor
-> (`agent`, nome legado `cursor-agent`) em modo headless — instale com
-> `curl https://cursor.com/install -fsS | bash` e faça login. Sem o CLI, o
-> plano continua funcionando na rota manual (os prompts de cada faixa vêm
-> prontos para os agentes paralelos da Agents Window).
+> planos pagos. Antes de executar qualquer plano, o agente mostra o
+> **modelo de cada tarefa** e pergunta se está dentro do seu plano — você
+> responde na conversa (manter, trocar tudo pelo `composer`, ajustar uma
+> tarefa ou propor outro modelo) e o agente ajusta por você. Sem a sua
+> confirmação, nada roda.
 
 ### Antigravity
 
-Na **raiz do seu projeto**:
+Na **raiz do seu projeto**, rode:
 
 ```bash
 npx @onovoprogramador/onp-spec init --agents antigravity
 ```
 
-Isso cria a estrutura `.spec/` **e** instala a skill em
-`.agents/skills/onp-spec-driven/` (o diretório de skills do workspace do
-Antigravity). Abra uma conversa nova e pronto.
+O comando faz duas coisas:
 
-### Sem npm/npx (instalação manual)
+1. cria a estrutura `.spec/` do projeto;
+2. instala a skill em `.agents/skills/onp-spec-driven/` — o diretório de
+   skills do workspace do Antigravity.
 
-Baixe o repositório e copie a pasta da skill do seu agente:
+**Para ativar:** abra uma conversa nova e pronto — a execução paralela usa
+os agentes nativos do Antigravity, sem depender de CLI nenhum.
+
+### Sem npm/npx (instalação manual, por projeto)
+
+Baixe o repositório uma vez e copie a pasta da skill do seu agente para
+dentro do projeto. A pasta de destino se chama **sempre** `onp-spec-driven`:
 
 ```bash
 git clone --depth 1 https://github.com/onovoprogramador/onp-spec-driven.git /tmp/onp-spec
@@ -116,19 +140,38 @@ mkdir -p .agents/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity .agents/skills/onp-spec-driven
 ```
 
-Quer a skill disponível em **todos** os seus projetos? Copie para o diretório
-global do agente em vez do projeto: `~/.claude/skills/` (Claude Code),
-`~/.agents/skills/` (Codex), `~/.cursor/skills/` (Cursor) ou
-`~/.gemini/config/skills/` (Antigravity) — **sempre com a pasta destino
-chamada `onp-spec-driven`**, como nos exemplos acima (o Cursor exige que o
-nome da pasta seja igual ao `name:` da skill; copiar como
-`onp-spec-driven-cursor` a deixaria inválida):
+### Instalação global — a skill em todos os seus projetos
+
+Prefere instalar **uma vez só**, para todos os projetos? Copie a skill para o
+diretório global do seu agente (em vez do diretório do projeto). A regra é a
+mesma: **a pasta de destino se chama `onp-spec-driven`** — o Cursor, por
+exemplo, exige que o nome da pasta seja igual ao nome interno da skill, e
+copiar como `onp-spec-driven-cursor` a deixaria inválida.
 
 ```bash
-# exemplo (Cursor, global)
+git clone --depth 1 https://github.com/onovoprogramador/onp-spec-driven.git /tmp/onp-spec
+
+# Claude Code (global)
+mkdir -p ~/.claude/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven ~/.claude/skills/onp-spec-driven
+
+# Codex (global)
+mkdir -p ~/.agents/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-codex ~/.agents/skills/onp-spec-driven
+
+# Cursor (global)
 mkdir -p ~/.cursor/skills
 cp -r /tmp/onp-spec/skills/onp-spec-driven-cursor ~/.cursor/skills/onp-spec-driven
+
+# Antigravity (global)
+mkdir -p ~/.gemini/config/skills
+cp -r /tmp/onp-spec/skills/onp-spec-driven-antigravity ~/.gemini/config/skills/onp-spec-driven
 ```
+
+Com a skill global, a estrutura `.spec/` continua sendo por projeto — mas
+você não precisa rodar nada: na primeira conversa, peça *"inicializa o
+onp-spec aqui"* e o agente cria tudo (o motor embarcado da skill cuida
+disso).
 
 > **Importante:** cada agente tem a SUA skill — a do Claude Code executa o
 > plano com sessões headless paralelas do próprio Claude; a do Codex, com
@@ -170,20 +213,19 @@ O que você recebe de volta, sempre em português simples:
   PODEM rodar **em paralelo**, cada uma em sua janela limpa (git worktree +
   branch próprios). Mas quem decide é você: o agente apresenta o plano como
   **recomendação** (*"X dessas tarefas podem rodar em paralelo"*) e
-  **pergunta QUAIS você quer paralelizar** — todas, só algumas
-  (`onp-spec plano <feature> --paralelizar T-001,T-003`: as escolhidas em
-  paralelo, o resto uma após a outra ao final) ou nenhuma
-  (`--sequencial`: tudo na ordem, na árvore principal) — sempre com a mesma
-  disciplina de commits e o mesmo gate.
+  **pergunta QUAIS você quer paralelizar** — todas, só algumas (as
+  escolhidas em paralelo, o resto uma após a outra ao final) ou nenhuma
+  (tudo na ordem, na árvore principal) — sempre com a mesma disciplina de
+  commits e o mesmo gate.
 - **Você sempre sabe o que está rolando** — antes de executar, o agente avisa
   que as alterações vão rodar **em background**; enquanto rodam, a cada 1
   minuto ele posta no chat a **tabela de andamento** (qual tarefa está
-  rodando, qual não está, o que concluiu/falhou — `onp-spec resumo <feature>
-  --tabela`) e o **resumo geral de andamento**: um parágrafo em português
-  (escrito por IA, com fallback do motor). Ao final, você recebe o resumo
-  completo da execução.
-- **Falhou uma faixa? refaça só ela** — `--faixa <id>` repete apenas aquela
-  faixa, do zero e numa janela limpa, sem tocar no que já passou.
+  rodando, qual não está, o que concluiu/falhou) e o **resumo geral de
+  andamento**: um parágrafo em português (escrito por IA, com fallback do
+  motor). Ao final, você recebe o resumo completo da execução.
+- **Falhou uma faixa? refaça só ela** — peça *"reexecuta só a faixa 2"* e o
+  agente repete apenas aquela faixa, do zero e numa janela limpa, sem tocar
+  no que já passou.
 - **Gestão de commits e branches feita** — 1 tarefa = 1 commit rastreável,
   merges organizados, árvore limpa no final.
 - **A prova** — ao final, a auditoria mecânica: cada critério de aceite tem um
