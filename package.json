@@ -1,8 +1,9 @@
 {
   "name": "@onovoprogramador/onp-spec",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "description": "Spec-anchored development: specs auditáveis contra o código, DoD executável, suposições explícitas e constituição verificável. Zero dependências.",
   "type": "module",
@@ -14,15 +15,22 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test \"test/*.test.js\"",
+    "build": "node tools/build-skill.mjs",
+    "test": "node tools/test.mjs",
     "bench": "node benchmark/run.js",
-    "prepublishOnly": "npm test"
+    "release:check": "node tools/check-release.mjs",
+    "prepack": "node tools/build-skill.mjs --quiet",
+    "prepublishOnly": "npm run release:check",
+    "bench:performance": "node benchmark/performance.js"
   },
   "files": [
     "bin/",
     "src/",
     "templates/",
     "skills/",
+    "docs/GUIA-DE-INTEGRACOES.md",
+    "docs/ATUALIZACOES-0.10.0.svg",
+    "docs/ATUALIZACOES-0.10.0.md",
     "README.md",
     "LICENSE"
   ],
@@ -33,10 +41,19 @@
     "rastreabilidade",
     "lgpd",
     "ai-coding",
-    "claude-code",
-    "codex",
-    "cursor"
+    "developer-tools",
+    "requirements",
+    "automation",
+    "worktrees"
   ],
   "author": "Vitor Manoel — O Novo Programador",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/onovoprogramador/onp-spec-driven.git"
+  },
+  "homepage": "https://github.com/onovoprogramador/onp-spec-driven#readme",
+  "bugs": {
+    "url": "https://github.com/onovoprogramador/onp-spec-driven/issues"
+  },
   "license": "MIT"
 }

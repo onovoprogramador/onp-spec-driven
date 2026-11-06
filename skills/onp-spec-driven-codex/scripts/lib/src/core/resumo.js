@@ -1,5 +1,5 @@
 // Resumo geral de andamento — o texto que o agente posta no chat e o
-// executor imprime no terminal a cada ~1 minuto durante a execução.
+// usuário pode consultar sob demanda durante a execução.
 //
 // Duas origens, sempre rotuladas:
 //   'ia'    — escrito por um modelo (o executor headless chama `claude -p`,
@@ -158,7 +158,7 @@ export function contextoParaIa(projetos) {
 
 // ── tabela de andamento (markdown, pronta para o chat) ─────────────────────
 //
-// O agente posta ESTA tabela no chat a cada ~1 minuto enquanto a execução
+// Esta tabela é diagnóstico sob demanda; o acompanhamento nativo da execução
 // roda: uma linha por tarefa, com onde ela roda (faixa/seq), o estado agora
 // e a última ação vista no stream. Célula é texto de UMA linha (pipes e
 // quebras são higienizados para não quebrar a tabela).

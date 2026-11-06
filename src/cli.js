@@ -1,19 +1,19 @@
 // CLI onp-spec — dispatch de comandos.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync, chmodSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   montarPlano,
   renderPlanoMd,
   renderPlanoSh,
-  renderPlanoHtml,
+  renderPlanoMjs,
   renderPlanoJson,
   usaExecutorSh,
   normalizarEsforco,
   AGENTES,
 } from './core/plano.js';
-import { registrarEvento, podarLedger, lerStream, lerEventos, montarArvore } from './core/ledger.js';
+import { registrarEvento, lerStream, lerEventos, montarArvore } from './core/ledger.js';
 import {
   resumoDeterministico,
   contextoParaIa,
@@ -43,6 +43,13 @@ import {
   LICOES_DEFAULTS,
 } from './core/licoes.js';
 
+import { executePlan, listExecutionWorktrees, cleanupExecutionWorktrees, planSourceFingerprint } from './core/executor.js';
+import { discoverModels, readQuota, HARNESS_CAPABILITIES } from './core/harness.js';
+import { scaffoldGovernance, checkGovernance, recordImpactReview, recordGovernanceDecision, DOCUMENTATION_MARKER, documentLinks } from './core/governance.js';
+import { listExecutionPlans } from './core/execution-history.js';
+import { installSkill, pathExists } from './core/install.js';
+import { reservePlanArtifacts, selectExecutionPlan } from './core/plan-artifacts.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 
@@ -67,16 +74,17 @@ const SKILL_DIR_POR_AGENTE = {
   antigravity: 'onp-spec-driven-antigravity',
   codex: 'onp-spec-driven-codex',
   cursor: 'onp-spec-driven-cursor',
+  opencode: 'onp-spec-driven-opencode',
 };
 
-// diretório de skills que cada agente lê DENTRO do projeto (o nome da pasta
-// da skill instalada é sempre onp-spec-driven — no Cursor o `name:` do
-// frontmatter TEM que ser igual ao nome da pasta)
+// Diretório de skills de cada agente. Primeira instalação: onp-spec-driven;
+// atualizações coexistem em pastas versionadas com name igual à pasta.
 const SKILLS_DIR_PROJETO = {
   claude: '.claude',
   antigravity: '.agents',
   codex: '.agents',
   cursor: '.cursor',
+  opencode: '.opencode',
 };
 
 function resolveSkillDir(agent = 'claude') {
@@ -94,83 +102,30 @@ function resolveSkillDir(agent = 'claude') {
   return null;
 }
 
-const HELP = `onp-spec — spec-anchored development (a especificação que continua verdadeira)
+const HELP = `onp-spec — desenvolvimento ancorado em especificações
 
-uso: onp-spec <comando> [opções]
-
-comandos:
-  init [--preset base|lgpd-educacao] [--agents claude|antigravity|codex|cursor]
-                      cria .spec/, constituição e config no diretório atual
-                      (--agents também instala a skill do agente escolhido)
-  new <feature>       cria .spec/features/<feature>/ com spec.md e tasks.md
-  plano <feature> [--agents claude|antigravity|codex|cursor] [--paralelizar T-xxx,T-yyy]
-                  [--sequencial] [--modelo <modelo>] [--esforco <nível>]
-                      plano de execução. Default: agrupa tarefas em faixas
-                      PARALELAS (arquivos disjuntos → 1 worktree + 1 branch +
-                      1 janela limpa por faixa). Com --paralelizar: só as
-                      tarefas ESCOLHIDAS entram nas faixas (o resto roda uma
-                      após a outra, ao final). Com --sequencial: tudo uma
-                      tarefa após a outra, na árvore principal. QUAIS tarefas
-                      paralelizar é escolha do USUÁRIO (o agente pergunta
-                      antes de executar).
-                      · sempre: plano-execucao.md (faixas/ordem, branches,
-                        commits) + plano.json
-                      · claude: executar-tarefas.sh (claude -p headless com
-                        --model/--effort por tarefa e resumo de andamento a
-                        cada 1 min no terminal) + plano-execucao.html (visual)
-                      · codex: executar-tarefas.sh (codex exec headless com
-                        --json, sandbox e --model/model_reasoning_effort por
-                        tarefa) + plano-execucao.html (visual)
-                      · cursor: executar-tarefas.sh (CLI do Cursor headless:
-                        agent -p com --model por tarefa, stream-json e
-                        --force; esforço vai no slug do modelo) +
-                        plano-execucao.html (visual)
-                      · antigravity: prompts prontos p/ os agentes nativos
-                        (não depende de CLI nenhum)
-                      Custo é escolha do USUÁRIO: --modelo/--esforco travam
-                      modelo e esforço de TODAS as tarefas (vencem tasks.md e
-                      config) — o agente confirma modelos/esforços com o
-                      usuário ANTES de executar
-  resumo [feature] [--tabela] [--global] [--run <runId>]
-         [--gravar [--texto "..."] [--origem ia|motor]]
-                      o RESUMO GERAL DE ANDAMENTO em texto: o que está
-                      rodando agora, o que terminou, o que falhou. É o texto
-                      que o agente posta no chat a cada ~1 min enquanto houver
-                      execução. --tabela imprime a TABELA de andamento em
-                      markdown (uma linha por tarefa: onde roda, status e
-                      última ação) — pronta para colar no chat junto com o
-                      texto. --gravar registra no ledger (com --texto, é a
-                      IA/agente escrevendo; sem, vale o do motor).
-  tarefa <feature> <T-xxx> [status] [--modelo <modelo>] [--esforco <nível>]
-                      atualiza a tarefa no tasks.md: status (pendente |
-                      em-andamento | concluida) e/ou o custo dela (--modelo e
-                      --esforco definem Modelo:/Esforço: — regenere o plano
-                      depois)
+  init [--preset base|lgpd-educacao] [--agents claude|codex|cursor|antigravity|opencode] [--nova-versao]
+  new <feature> [--grande] [--cliente "pedido literal"] [--dominios dominio,outro]
+  plano <feature> [--agents <harness>] [--paralelizar T-xxx,T-yyy|--sequencial]
+        [--modelo <modelo disponível>] [--esforco baixo|medio|alto|xalto|max]
+  harness [--agents <harness>]    capacidades, modelos atuais e cota real (JSON)
+  executar <feature> [--run <id>] [--faixa <id>|--seq <T-xxx>|--gate|--listar]
+  impacto <feature> [--revisao <arquivo.json>|--decisao <arquivo.json>]
+  worktrees <feature> [--run <id>] [--limpar --confirmar]
+  tarefa <feature> <T-xxx> [status] [--modelo <id>] [--esforco <nível>]
+  scaffold <feature> [--force]   cria testes que falham até implementar
+  verify <feature>              test runner registra provas
   audit [--ci] [--json] [--md <arquivo>]
-                      audita especificação ↔ tarefas ↔ testes ↔ código ↔ constituição
-                      exit 1 se houver erro (use no CI)
-  verify <feature>    roda os testes e grava a prova de cada critério de aceite
-                      (quem decide é o test runner)
-  scaffold <feature> [--force]
-                      gera esqueleto de teste (que falha) para cada critério
-                      de aceite ainda sem teste
-  status              visão geral: features, critérios provados, suposições e
-                      perguntas abertas
-  assumptions         lista todas as suposições e perguntas com status
+  status | assumptions
+  resumo [feature] [--tabela] [--global] [--run <id>] [--gravar --texto "..."]
   licoes <add|list|sugerir|penalizar|status>
-                      lições aprendidas COM LASTRO: só entra lição ancorada em
-                      sinal real do audit/verify; promoção mecânica ao recorrer
-                      em features distintas (detalhes: onp-spec licoes)
-  help                esta ajuda
+  version | help
 
-fluxo típico:
-  onp-spec init --preset lgpd-educacao
-  onp-spec new entrega-dever-casa      # escreva histórias, critérios, suposições e perguntas
-  onp-spec scaffold entrega-dever-casa # cada critério vira um teste que falha
-  onp-spec plano entrega-dever-casa    # tarefas em faixas paralelas + artefatos de execução
-  ... execute o plano (ou implemente à mão) até os testes passarem ...
-  onp-spec verify entrega-dever-casa   # o test runner grava a prova
-  onp-spec audit --ci                  # 0 = especificação e código alinhados`;
+Progresso, perguntas, timers e notificações usam os recursos nativos do harness.
+Executor portátil: node .spec/features/<feature>/executar-tarefas.mjs
+Cota <=5%: checkpoint, espera e nova consulta antes de continuar.
+Sem telemetria inicial, conecte quotaCommand; após limite, preserve a espera até leitura fresca.
+Limpeza exige confirmação do usuário; worktrees sujos/ativos/não integrados ficam.`;
 
 function parseFlags(args) {
   const flags = {};
@@ -209,20 +164,25 @@ function cmdInit(rootDir, flags) {
     return 2;
   }
 
-  const specRoot = path.join(rootDir, '.spec');
+  if (flags.agents !== undefined && flags.agents !== true && !AGENTES.includes(flags.agents)) {
+    console.error(`--agents desconhecido: "${flags.agents}" (use: ${AGENTES.join(', ')})`);
+    return 2;
+  }
+  const config = loadConfig(rootDir);
+  const specRoot = path.join(rootDir, config.specDir);
   mkdirSync(path.join(specRoot, 'features'), { recursive: true });
   mkdirSync(path.join(specRoot, 'verification'), { recursive: true });
 
   const constitutionPath = path.join(specRoot, 'constituicao.md');
-  if (existsSync(constitutionPath)) {
-    console.log('· .spec/constituicao.md já existe — mantido');
+  if (pathExists(constitutionPath)) {
+    console.log(`· ${config.specDir}/constituicao.md já existe — mantido`);
   } else {
-    writeFileSync(constitutionPath, template(presetFile));
-    console.log(`✔ .spec/constituicao.md criado (preset: ${preset})`);
+    writeFileSync(constitutionPath, template(presetFile), { flag: 'wx' });
+    console.log(`✔ ${config.specDir}/constituicao.md criado (preset: ${preset})`);
   }
 
   const configPath = path.join(rootDir, 'onpspec.config.json');
-  if (existsSync(configPath)) {
+  if (pathExists(configPath)) {
     console.log('· onpspec.config.json já existe — mantido');
   } else {
     const cfg = {
@@ -231,20 +191,16 @@ function cmdInit(rootDir, flags) {
       testGlobs: DEFAULT_CONFIG.testGlobs,
       srcGlobs: DEFAULT_CONFIG.srcGlobs,
     };
-    writeFileSync(configPath, `${JSON.stringify(cfg, null, 2)}\n`);
+    writeFileSync(configPath, `${JSON.stringify(cfg, null, 2)}\n`, { flag: 'wx' });
     console.log('✔ onpspec.config.json criado (testCommand: "node --test" — ajuste à sua stack)');
   }
 
   const gitignorePath = path.join(specRoot, 'verification', '.gitkeep');
-  if (!existsSync(gitignorePath)) writeFileSync(gitignorePath, '');
+  if (!pathExists(gitignorePath)) writeFileSync(gitignorePath, '', { flag: 'wx' });
 
   if (flags.agents !== undefined) {
     const agent = flags.agents === true ? 'claude' : flags.agents;
-    if (!AGENTES.includes(agent)) {
-      console.error(`--agents desconhecido: "${flags.agents}" (use: ${AGENTES.join(', ')})`);
-      return 2;
-    }
-    const rotulo = { claude: 'Claude Code', antigravity: 'Antigravity', codex: 'Codex', cursor: 'Cursor' }[agent];
+    const rotulo = { claude: 'Claude Code', antigravity: 'Antigravity', codex: 'Codex', cursor: 'Cursor', opencode: 'OpenCode' }[agent];
     // Cada agente lê seu diretório de skills no projeto (.claude, .cursor);
     // Codex e Antigravity leem o MESMO (.agents/skills — o padrão cross-agent
     // que o Codex adota). O marcador `agent:` no frontmatter diz de quem é a
@@ -253,12 +209,12 @@ function cmdInit(rootDir, flags) {
     const dest = path.join(rootDir, destRel);
     const skillDir = resolveSkillDir(agent);
     const marcadorExistente = skillAgentMarker(dest);
-    if (marcadorExistente && marcadorExistente !== agent) {
+    if (marcadorExistente && marcadorExistente !== agent && !flags['nova-versao']) {
       const nota =
         SKILLS_DIR_PROJETO[agent] === '.agents' ? ' — Codex e Antigravity compartilham esse diretório.' : '.';
       console.error(
         `✘ ${destRel} já contém a skill do agente "${marcadorExistente}"${nota}\n` +
-          `  Para trocar de agente, remova a pasta antes: rm -rf ${destRel}`
+          `  Arquivos preservados. Para instalar uma variante separada: onp-spec init --agents ${agent} --nova-versao`
       );
       return 2;
     }
@@ -269,8 +225,10 @@ function cmdInit(rootDir, flags) {
     } else if (path.resolve(dest) === path.resolve(skillDir)) {
       console.log(`· skill já instalada em ${destRel} — mantida`);
     } else {
-      copyDirIfExists(skillDir, dest);
-      console.log(`✔ skill instalada em ${destRel} (${rotulo})`);
+      const installed = installSkill(skillDir, dest, { agent, versioned: Boolean(flags['nova-versao']) });
+      const installedRel = path.relative(rootDir, installed.destination);
+      console.log(`${installed.reused ? '· skill mantida' : '✔ skill instalada'} em ${installedRel} (${rotulo})`);
+      if (installed.destination !== dest) console.log(`· instalação anterior preservada; para usar esta versão, invoque ${installed.name} no harness.`);
     }
     // o Cursor lê .cursor/skills E .agents/skills nativamente (e .claude/
     // .codex por compatibilidade) — duas variantes no mesmo projeto = duas
@@ -281,7 +239,7 @@ function cmdInit(rootDir, flags) {
         if (marcadorOutro && marcadorOutro !== 'cursor') {
           console.log(
             `⚠ este projeto também tem a skill do agente "${marcadorOutro}" em ${outroDir}/skills/onp-spec-driven — o Cursor lê esse diretório também e pode carregar a skill errada.\n` +
-              `  Se este projeto é do Cursor, remova a outra: rm -rf ${outroDir}/skills/onp-spec-driven`
+              `  As duas instalações foram preservadas. Selecione explicitamente a variante do Cursor no harness.`
           );
         }
       }
@@ -290,11 +248,6 @@ function cmdInit(rootDir, flags) {
 
   console.log('\npróximo passo: onp-spec new <nome-da-feature>');
   return 0;
-}
-
-function copyDirIfExists(src, dest) {
-  if (!existsSync(src)) return;
-  cpSync(src, dest, { recursive: true });
 }
 
 function cmdNew(rootDir, name, flags) {
@@ -306,15 +259,13 @@ function cmdNew(rootDir, name, flags) {
     console.error(`nome inválido: "${name}" — use kebab-case (letras minúsculas, números e hífen)`);
     return 2;
   }
-  const dir = path.join(rootDir, '.spec', 'features', name);
-  if (existsSync(path.join(dir, 'spec.md'))) {
-    console.error(`feature "${name}" já existe em .spec/features/${name}/`);
+  const config = loadConfig(rootDir);
+  const dir = path.join(rootDir, config.specDir, 'features', name);
+  if (pathExists(dir)) {
+    console.error(`feature "${name}" já existe em ${config.specDir}/features/${name}/ — todos os arquivos foram preservados; use outro nome.`);
     return 2;
   }
-  mkdirSync(dir, { recursive: true });
-
   // IDs únicos no projeto: continua a numeração a partir do maior ID existente
-  const config = loadConfig(rootDir);
   const project = loadProject(config);
   let maxUs = 0;
   let maxAc = 0;
@@ -334,16 +285,32 @@ function cmdNew(rootDir, name, flags) {
   let spec = template('spec.md');
   spec = fill(spec, { TITULO: titulo, FEATURE: name, TITULO_HISTORIA: '[título da história]' });
   spec = spec.replace('US-001', `US-${pad(maxUs + 1)}`).replace('AC-001', `AC-${pad(maxAc + 1)}`);
-  writeFileSync(path.join(dir, 'spec.md'), spec);
 
   let tasks = template('tasks.md');
   tasks = fill(tasks, { TITULO: titulo, FEATURE: name });
   tasks = tasks
     .replace('US-001, AC-001', `US-${pad(maxUs + 1)}, AC-${pad(maxAc + 1)}`);
-  writeFileSync(path.join(dir, 'tasks.md'), tasks);
+  const large = Boolean(flags.grande || flags.escopo === 'grande');
+  if (large) {
+    spec = `${DOCUMENTATION_MARKER}\n\n${spec}\n## Documentos relacionados\n\n${documentLinks('spec.md')}\n`;
+    tasks = `${DOCUMENTATION_MARKER}\n\n${tasks}\n## Documentos relacionados\n\n${documentLinks('tasks.md')}\n`;
+  }
+  mkdirSync(path.dirname(dir), { recursive: true });
+  mkdirSync(dir); // criação exclusiva: até uma feature parcial é preservada
+  writeFileSync(path.join(dir, 'spec.md'), spec, { flag: 'wx' });
+  writeFileSync(path.join(dir, 'tasks.md'), tasks, { flag: 'wx' });
+  if (large) {
+    scaffoldGovernance(rootDir, name, {
+      specDir: config.specDir,
+      newFeature: true,
+      clientRequest: typeof flags.cliente === 'string' ? flags.cliente : '',
+      domains: typeof flags.dominios === 'string' ? flags.dominios.split(',').map((d) => d.trim()).filter(Boolean) : [],
+    });
+    console.log(`✔ PRD, ADR, TDD (design.md), research e governança: ${path.relative(rootDir, dir)}`);
+  }
 
-  console.log(`✔ .spec/features/${name}/spec.md`);
-  console.log(`✔ .spec/features/${name}/tasks.md`);
+  console.log(`✔ ${config.specDir}/features/${name}/spec.md`);
+  console.log(`✔ ${config.specDir}/features/${name}/tasks.md`);
   console.log(`\npróximos passos:`);
   console.log(`  1. escreva as histórias de usuário e os critérios de aceite (Dado/Quando/Então)`);
   console.log(`     e PREENCHA as seções Suposições e Perguntas em aberto`);
@@ -373,7 +340,10 @@ function detectarAgente(rootDir, flag) {
   const iCursor = segmentos.indexOf('.cursor');
   if (iCursor !== -1 && segmentos[iCursor + 1] === 'skills') return { agent: 'cursor' };
   if (segmentos.includes('.agents')) return { agent: 'antigravity' };
+  if (segmentos.includes('.opencode')) return { agent: 'opencode' };
   if (segmentos.includes('.claude')) return { agent: 'claude' };
+  const marcadorOpenCode = skillAgentMarker(path.join(rootDir, '.opencode', 'skills', 'onp-spec-driven'));
+  if (marcadorOpenCode === 'opencode') return { agent: 'opencode' };
   const temClaude = existsSync(path.join(rootDir, '.claude', 'skills', 'onp-spec-driven'));
   const marcadorProjeto = skillAgentMarker(path.join(rootDir, '.agents', 'skills', 'onp-spec-driven'));
   if (AGENTES.includes(marcadorProjeto) && !temClaude) return { agent: marcadorProjeto };
@@ -394,18 +364,27 @@ function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, 
     enginePath: process.argv[1],
   });
   if (plan.erro) return plan;
-  const dir = path.join(project.config.rootDir, plan.baseDir);
-  writeFileSync(path.join(dir, 'plano-execucao.md'), renderPlanoMd(plan));
-  const planoJson = renderPlanoJson(plan);
-  writeFileSync(path.join(dir, 'plano.json'), planoJson);
-  const gerados = [`${plan.baseDir}/plano-execucao.md`, `${plan.baseDir}/plano.json`];
-  if (usaExecutorSh(plan.agent)) {
-    const sh = path.join(dir, 'executar-tarefas.sh');
-    writeFileSync(sh, renderPlanoSh(plan));
-    chmodSync(sh, 0o755);
-    writeFileSync(path.join(dir, 'plano-execucao.html'), renderPlanoHtml(plan));
-    gerados.push(`${plan.baseDir}/executar-tarefas.sh`, `${plan.baseDir}/plano-execucao.html`);
-  }
+  const reserved = reservePlanArtifacts(project.config.rootDir, plan);
+  plan.artifactDir = reserved.artifactDir;
+  let planoJson;
+  const gerados = [];
+  try {
+    const write = (name, content, executable = false) => {
+      const file = path.join(reserved.directory, name);
+      writeFileSync(file, content, { flag: 'wx' });
+      if (executable) chmodSync(file, 0o755);
+      gerados.push(`${plan.artifactDir}/${name}`);
+    };
+    write('plano-execucao.md', renderPlanoMd(plan));
+    if (usaExecutorSh(plan.agent)) {
+      write('executar-tarefas.sh', renderPlanoSh(plan), true);
+      write('executar-tarefas.mjs', renderPlanoMjs(plan));
+    }
+    const planoData = JSON.parse(renderPlanoJson(plan));
+    planoData.sourceFingerprint = planSourceFingerprint(project.config.rootDir, planoData);
+    planoJson = `${JSON.stringify(planoData, null, 2)}\n`;
+    write('plano.json', planoJson); // publica o seletor só após completar os artefatos
+  } finally { reserved.release(); }
   // registra a execução no ledger GLOBAL: é assim que o `onp-spec resumo`
   // enxerga este projeto junto com os outros, mesmo antes de qualquer execução
   registrarEvento({
@@ -417,7 +396,6 @@ function gerarArtefatosPlano(project, featureName, agent, { sequencial = false, 
     agent: plan.agent,
     plano: JSON.parse(planoJson),
   });
-  podarLedger();
   plan.gerados = gerados;
   return plan;
 }
@@ -492,11 +470,11 @@ function cmdPlano(project, positional, flags) {
   }
   if (det.agent === 'cursor' && typeof flags.esforco === 'string') {
     console.log(
-      '⚠ o CLI do Cursor não tem flag de esforço — o valor fica registrado no plano, mas o nível vai no slug do modelo (ex.: gpt-5.6-terra-high)'
+      '⚠ o CLI do Cursor não tem flag de esforço — escolha um identificador de modelo confirmado pelo catálogo do harness'
     );
   }
   if (flags.modelo === true) {
-    console.error('erro: --modelo precisa de um valor (ex.: --modelo gpt-5.6-luna)');
+    console.error('erro: --modelo precisa de um valor (use --modelo <id-do-catálogo>)');
     return 2;
   }
   if (flags.esforco === true) {
@@ -547,45 +525,22 @@ function cmdPlano(project, positional, flags) {
   console.log('\nonde está cada coisa:');
   console.log(`  · plano (leia primeiro): ${plan.gerados[0]}`);
   if (usaExecutorSh(plan.agent)) {
-    console.log(`  · executor headless:     ${plan.baseDir}/executar-tarefas.sh`);
-    console.log(`  · visual (leitura):      ${plan.baseDir}/plano-execucao.html`);
+    console.log(`  · executor portátil:     ${plan.artifactDir}/executar-tarefas.mjs`);
   }
   for (const a of plan.avisos) console.log(`  ⚠ ${a}`);
-  // custo é do usuário: no codex e no cursor, o agente apresenta modelo (e
-  // esforço, quando o CLI o aceita) por tarefa e CONFIRMA antes de executar
-  // (licença barata torra tokens fácil)
-  if (det.agent === 'codex') {
-    console.log('\nmodelos e esforços deste plano — CONFIRME com o usuário antes de executar (os tokens são dele):');
-    const todas = [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais];
-    for (const t of todas) console.log(`  · ${t.id} — ${t.model} · esforço ${t.esforcoCli}`);
-    console.log(
-      `  quer gastar menos? tudo: onp-spec plano ${featureName} --modelo gpt-5.6-luna --esforco baixo` +
-        `\n  por tarefa: onp-spec tarefa ${featureName} T-xxx --modelo <m> --esforco <nível> (e regenere o plano)`
-    );
+  console.log('\nmodelos/esforços solicitados — confirme custos ainda não autorizados com a ferramenta nativa:');
+  for (const t of [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais]) {
+    console.log(`  · ${t.id} — ${t.model || 'padrão disponível do harness'} · esforço ${t.esforcoCli}`);
   }
-  if (det.agent === 'cursor') {
-    console.log('\nmodelos deste plano — CONFIRME com o usuário antes de executar (os tokens são dele):');
-    const todas = [...plan.faixas.flatMap((fx) => fx.tasks), ...plan.sequenciais];
-    for (const t of todas) console.log(`  · ${t.id} — ${t.model}`);
-    console.log(
-      '  (esforço no Cursor vai embutido no slug do modelo, ex.: gpt-5.6-terra-high — não existe flag)' +
-        `\n  quer gastar menos? tudo: onp-spec plano ${featureName} --modelo composer (uso incluído nos planos pagos do Cursor)` +
-        `\n  por tarefa: onp-spec tarefa ${featureName} T-xxx --modelo <m> (e regenere o plano)`
-    );
-  }
-  console.log('\npróximo passo:');
-  if (usaExecutorSh(plan.agent)) {
-    console.log(`  · executar: bash ${plan.baseDir}/executar-tarefas.sh`);
-    console.log('    (enquanto roda, o resumo geral de andamento sai a cada 1 min — repasse ao usuário)');
-  } else {
-    console.log(`  · abra um agente novo (janela limpa) por faixa e cole o prompt correspondente`);
-    console.log(`    do plano-execucao.md — depois merge + verify + audit, como descrito lá`);
-  }
+  console.log(`  consultar catálogo e cota: onp-spec harness --agents ${det.agent}`);
+  console.log(`\npróximo passo: node ${plan.artifactDir}/executar-tarefas.mjs`);
+  console.log('  Use o plano/tarefas nativos para acompanhar; ao encerrar, pergunte sobre limpar worktrees.');
+
   return 0;
 }
 
 // `onp-spec resumo` — o RESUMO GERAL DE ANDAMENTO. É o texto que o agente
-// posta no chat a cada ~1 minuto enquanto houver execução. Sem flags, imprime
+// consulta sob demanda, sem chamadas periódicas de inferência. Sem flags, imprime
 // (IA fresca do ledger > motor determinístico); com --gravar, registra no
 // ledger (--texto = escrito pela IA/agente do executor).
 function cmdResumo(config, positional, flags) {
@@ -598,7 +553,7 @@ function cmdResumo(config, positional, flags) {
     return 0;
   }
 
-  // a TABELA de andamento (markdown) — o agente cola no chat a cada ~1 min
+  // Tabela sob demanda para diagnóstico; o progresso usa ferramentas nativas.
   if (flags.tabela) {
     console.log(tabelaAndamento(projetos));
     return 0;
@@ -685,15 +640,17 @@ function cmdTarefa(config, positional, flags = {}) {
     console.error(`não achei ${config.specDir}/features/${featureName}/tasks.md`);
     return 2;
   }
-  let conteudo = readFileSync(tasksPath, 'utf-8');
-  const re = new RegExp(`^(##\\s+${taskId}\\s*${DASH}\\s*.*?)(\\s*\\[[^\\]]+\\])?\\s*$`, 'm');
+  const original = readFileSync(tasksPath, 'utf-8');
+  let conteudo = original;
+  // Somente o token de status muda: preserve recuos, CRLF e linhas em branco.
+  const re = new RegExp(`^(##[ \t]+${taskId}[ \t]*${DASH}[ \t]*[^\r\n]*?)(?:([ \t]*)\\[[^\\]\r\n]+\\])?([ \t]*)(\r?)$`, 'm');
   if (!re.test(conteudo)) {
     console.error(`tarefa ${taskId} não encontrada em ${config.specDir}/features/${featureName}/tasks.md`);
     return 2;
   }
   const mudancas = [];
   if (status) {
-    conteudo = conteudo.replace(re, `$1 [${status}]`);
+    conteudo = conteudo.replace(re, (_, heading, spacing, trailing, cr) => `${heading}${spacing ?? ' '}[${status}]${trailing}${cr}`);
     mudancas.push(`→ [${status}]`);
   }
   if (modelo || esforcoRaw) {
@@ -708,10 +665,10 @@ function cmdTarefa(config, positional, flags = {}) {
     }
     conteudo = linhas.join('\n');
   }
-  writeFileSync(tasksPath, conteudo);
+  if (conteudo !== original) writeFileSync(tasksPath, conteudo);
   console.log(`✔ ${taskId} ${mudancas.join(' · ')} em ${config.specDir}/features/${featureName}/tasks.md`);
   if (modelo || esforcoRaw) {
-    console.log(`· modelo/esforço mudou — regenere o plano: onp-spec plano ${featureName}`);
+    console.log(`· modelo/esforço mudou — crie uma nova versão separada do plano: onp-spec plano ${featureName}`);
   }
   return 0;
 }
@@ -941,7 +898,7 @@ export async function run(argv) {
   if (command === 'version' || flags.version) {
     try {
       const pkg = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-      console.log(pkg.version);
+      console.log(pkg.version || 'embarcada (skill onp-spec-driven)');
     } catch {
       // motor embarcado na skill não carrega package.json
       console.log('embarcada (skill onp-spec-driven)');
@@ -964,6 +921,51 @@ export async function run(argv) {
   if (command === 'stream-resumo') return cmdStreamResumo(positional);
   // resumo geral de andamento: só precisa do ledger, não do projeto carregado
   if (command === 'resumo') return cmdResumo(config, positional, flags);
+
+  if (command === 'harness') {
+    const det = detectarAgente(rootDir, flags.agents);
+    if (det.erro) throw new Error(det.erro);
+    const options = { cwd: rootDir, command: config.paralelo.command, modelsCommand: config.paralelo.modelsCommand, quotaCommand: config.paralelo.quotaCommand };
+    const [models, quota] = await Promise.all([discoverModels(det.agent, options), readQuota(det.agent, options)]);
+    console.log(JSON.stringify({ harness: det.agent, capabilities: HARNESS_CAPABILITIES[det.agent], models, quota }, null, 2));
+    return 0;
+  }
+  if (command === 'impacto') {
+    const feature = positional[0];
+    if (!feature) throw new Error('uso: onp-spec impacto <feature> [--revisao arquivo.json|--decisao arquivo.json]');
+    if (flags.revisao && flags.decisao) throw new Error('Registre revisão e decisão em comandos separados.');
+    if (flags.revisao) recordImpactReview(rootDir, feature, { ...JSON.parse(readFileSync(path.resolve(rootDir, flags.revisao), 'utf8')), specDir: config.specDir });
+    if (flags.decisao) recordGovernanceDecision(rootDir, feature, { ...JSON.parse(readFileSync(path.resolve(rootDir, flags.decisao), 'utf8')), specDir: config.specDir });
+    const result = checkGovernance(rootDir, feature, { specDir: config.specDir });
+    console.log(JSON.stringify(result, null, 2));
+    return result.ok ? 0 : 1;
+  }
+  if (command === 'executar' || command === 'worktrees') {
+    const feature = positional[0];
+    if (!feature || !/^[a-z0-9][a-z0-9-]*$/.test(feature)) throw new Error('Informe uma feature válida.');
+    if (command === 'worktrees') {
+      if (flags.run !== undefined && (typeof flags.run !== 'string' || !/^[\w.-]+$/.test(flags.run))) throw new Error('Informe um identificador válido em --run.');
+      const owned = listExecutionPlans(rootDir, { feature, onWarning: (message) => console.error(`· ${message}`) });
+      const plans = flags.run ? owned.filter((plan) => plan.runId === flags.run) : owned;
+      if (flags.run && !plans.length) throw new Error('Execução não encontrada no histórico desta feature.');
+      if (flags.limpar) {
+        if (plans.length > 1) throw new Error('Há mais de uma execução: liste os worktrees e escolha --run <id> antes de confirmar a limpeza.');
+        const result = plans.length
+          ? { runId: plans[0].runId, ...cleanupExecutionWorktrees(rootDir, plans[0], { confirmed: flags.confirmar === true }) }
+          : { removed: [], preserved: [] };
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const items = plans.flatMap((plan) => listExecutionWorktrees(rootDir, plan).map((item) => ({ ...item, runId: plan.runId })));
+        console.log(JSON.stringify(items, null, 2));
+      }
+      return 0;
+    }
+    const plan = selectExecutionPlan(rootDir, feature, { specDir: config.specDir, runId: flags.run });
+    if ([flags.faixa, flags.seq, flags.gate, flags.listar].filter(Boolean).length > 1) throw new Error('Escolha apenas um alvo de execução.');
+    const result = await executePlan(rootDir, plan, { lane: flags.faixa, task: flags.seq, gate: flags.gate, list: flags.listar });
+    if (flags.listar) console.log(JSON.stringify(result, null, 2));
+    return result.code;
+  }
 
   const project = loadProject(config);
 

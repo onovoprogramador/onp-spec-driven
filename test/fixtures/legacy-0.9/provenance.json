@@ -1,0 +1,13 @@
+{
+  "version": "0.9.0",
+  "commit": "4a79712e92653389fb1a8daacdcbad74efab38bf",
+  "description": "Unmodified renderPlanoSh/renderPlanoJson outputs from original src/core/plano.js. Synthetic legacy-project with T-001 in faixa-1 and T-002 sequential; enginePath=engine.mjs, fixed run IDs and date; legacy-model is intercepted by test-only local native stubs. Never regenerate using the current planner.",
+  "sha256": {
+    "claude.sh": "1666acfc449322742f44571eb5d428df1fff7ea3be99ca00e52f8db2497b6ce4",
+    "claude.json": "c63d1fa37ac18b82e8c958f25bc19d3ec6f075f8e4060055012a5b949a6cd184",
+    "codex.sh": "fd228220a1c117693cf5830cad9e7f27cb954827170da94b2aa84c28d43fa178",
+    "codex.json": "6503ca2c33b187882ac1d6075cfa7a5b1fccd8918398b6b0f1416fc53969fb20",
+    "cursor.sh": "3b2ef4fac9ee9286123486cdee4653d099a005899f270aca72b9780d24413f29",
+    "cursor.json": "fdbf7de32f5475efc4f01e0926a72c4d5836439e71892f6521b408f49f222281"
+  }
+}

@@ -16,7 +16,7 @@
 //   gate   {runId, etapa: verify|audit, exit}
 //   fim    {runId, exit, escopo}
 //   resumo {runId, texto, origem: ia|motor} — o "resumo geral de andamento"
-//          que o executor grava a cada ~1 min e o agente repassa no chat
+//          registrado sob demanda; progresso contínuo usa eventos nativos
 //
 // O stream de cada tarefa é o JSONL cru do CLI headless do agente —
 // `claude -p --output-format stream-json` (eventos system/assistant/user/
@@ -25,6 +25,8 @@
 // tool_call/result; init, assistant e result têm o MESMO shape do claude —
 // só as ferramentas chegam como tool_call) — e o parser abaixo transforma
 // qualquer um dos três em linha do tempo legível.
+// OpenCode: type + part (step_start/text/tool_use/step_finish/error).
+// Antigravity: event + payload correspondente (init/step_update/result).
 
 import os from 'os';
 import path from 'path';
@@ -353,6 +355,9 @@ export function resumirStream(texto, { desde = 0 } = {}) {
   let resumo = null;
   let pensando = null;
   let turnosCodex = 0;
+  const sessoesOpenCode = new Set();
+  const passosOpenCode = new Set();
+  const usoOpenCode = { tokensSaida: null, tokensEntrada: null, custoUsd: null };
 
   for (const linha of novas) {
     let e;
@@ -362,7 +367,53 @@ export function resumirStream(texto, { desde = 0 } = {}) {
       itens.push({ tipo: 'cru', texto: corta(linha, 300) });
       continue;
     }
-    if (e.type === 'system' && e.subtype === 'init') {
+    // Official AGY envelopes use `event`, and cumulative result fields live
+    // under `result`; never mistake step usage/thinking tokens for reasoning text.
+    if (e?.event === 'init') e = { ...e.init, type: 'init', conversation_id: e.conversation_id };
+    else if (e?.event === 'step_update') e = { ...e.step_update, type: 'step_update' };
+    else if (e?.event === 'result') e = { ...e.result, type: 'result' };
+    if (!e || typeof e !== 'object') continue;
+    if (e.type === 'init') {
+      itens.push({ tipo: 'inicio', modelo: e.model || null, sessao: String(e.conversation_id || '').slice(0, 8) });
+    } else if (e.type === 'step_update') {
+      if (e.step_type === 'agent_response' && typeof e.text_delta === 'string' && e.text_delta.trim()) {
+        itens.push({ tipo: 'texto', texto: corta(e.text_delta, 1200) });
+      } else if (e.step_type === 'tool' && e.state === 'DONE' && e.tool_info) {
+        const info = e.tool_info;
+        const nome = info.name || e.tool_name || 'Ferramenta';
+        itens.push({ tipo: 'ferramenta', nome, resumo: resumoFerramenta(nome, info.parameters || {}), detalhe: corta(JSON.stringify(info.parameters || {}, null, 2), 1200) });
+        if (info.output != null || info.error) itens.push({ tipo: 'saida', erro: Boolean(info.error), texto: corta(info.error?.message || textoDeConteudo(info.output), 600) });
+      }
+    } else if (e.type === 'step_start') {
+      const sessao = e.sessionID || e.part?.sessionID || '';
+      if (!sessoesOpenCode.has(sessao)) {
+        sessoesOpenCode.add(sessao);
+        itens.push({ tipo: 'inicio', modelo: null, sessao: String(sessao).slice(0, 8) });
+      }
+    } else if (e.type === 'text' && e.part?.text) {
+      itens.push({ tipo: 'texto', texto: corta(e.part.text, 1200) });
+    } else if (e.type === 'tool_use' && e.part) {
+      const part = e.part;
+      const state = part.state || {};
+      const nome = part.tool || 'Ferramenta';
+      itens.push({ tipo: 'ferramenta', nome, resumo: resumoFerramenta(nome, state.input || {}), detalhe: corta(JSON.stringify(state.input || {}, null, 2), 1200) });
+      if (state.output != null || state.error) itens.push({ tipo: 'saida', erro: state.status === 'error', texto: corta(state.error?.message || state.error || textoDeConteudo(state.output), 600) });
+    } else if (e.type === 'step_finish' && e.part) {
+      const part = e.part;
+      const id = part.id || part.messageID;
+      if (!id || !passosOpenCode.has(id)) {
+        if (id) passosOpenCode.add(id);
+        for (const [key, value] of Object.entries({ tokensSaida: part.tokens?.output, tokensEntrada: part.tokens?.input, custoUsd: part.cost })) {
+          if (typeof value === 'number' && Number.isFinite(value)) usoOpenCode[key] = (usoOpenCode[key] ?? 0) + value;
+        }
+      }
+      // tool-calls ends an inference step, not the task. Only "stop" is a
+      // successful terminal reason; truncated/filtered/unknown finishes aren't.
+      if (part.reason !== 'tool-calls') {
+        resumo = { status: part.reason === 'stop' ? 'sucesso' : 'incompleto', duracaoMs: null, turnos: null, ...usoOpenCode };
+        itens.push({ tipo: 'fim', ...resumo, texto: String(part.reason || '') });
+      }
+    } else if (e.type === 'system' && e.subtype === 'init') {
       itens.push({ tipo: 'inicio', modelo: e.model, sessao: String(e.session_id || '').slice(0, 8) });
     } else if (e.type === 'system' && e.subtype === 'thinking_tokens') {
       // agrega: um item de "pensando" que cresce, em vez de dezenas de linhas
@@ -407,14 +458,14 @@ export function resumirStream(texto, { desde = 0 } = {}) {
     } else if (e.type === 'result') {
       pensando = null;
       resumo = {
-        status: e.is_error ? 'erro' : e.subtype === 'success' ? 'sucesso' : String(e.subtype || ''),
-        duracaoMs: e.duration_ms ?? null,
+        status: e.status ? (e.status === 'SUCCESS' ? 'sucesso' : e.status === 'ERROR' ? 'erro' : String(e.status).toLowerCase()) : e.is_error ? 'erro' : e.subtype === 'success' ? 'sucesso' : String(e.subtype || ''),
+        duracaoMs: e.duration_ms ?? (typeof e.duration_seconds === 'number' ? e.duration_seconds * 1000 : null),
         turnos: e.num_turns ?? null,
         custoUsd: e.total_cost_usd ?? null,
         tokensSaida: e.usage?.output_tokens ?? null,
         tokensEntrada: e.usage?.input_tokens ?? null,
       };
-      itens.push({ tipo: 'fim', ...resumo, texto: corta(e.result, 600) });
+      itens.push({ tipo: 'fim', ...resumo, texto: corta(e.error?.message || e.error || e.response || e.result, 600) });
     } else if (e.type === 'tool_call' && e.subtype === 'completed' && e.tool_call) {
       // CLI do Cursor: a ferramenta chega como tool_call (started/completed);
       // só o completed entra na linha do tempo — o started viraria duplicata
@@ -488,7 +539,12 @@ export function resumirStream(texto, { desde = 0 } = {}) {
       itens.push({ tipo: 'fim', ...resumo, texto: corta(e.error?.message || '', 600) });
     } else if (e.type === 'error') {
       pensando = null;
-      itens.push({ tipo: 'saida', erro: true, texto: corta(e.message, 600) });
+      const texto = corta(e.error?.message || e.error?.data?.message || e.message, 600);
+      itens.push({ tipo: 'saida', erro: true, texto });
+      if (e.sessionID) {
+        resumo = { status: 'erro', duracaoMs: null, turnos: null, ...usoOpenCode };
+        itens.push({ tipo: 'fim', ...resumo, texto });
+      }
     }
   }
 

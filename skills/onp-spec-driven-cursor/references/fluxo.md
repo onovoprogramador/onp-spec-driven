@@ -1,134 +1,79 @@
-# Fluxo detalhado — do zero ao audit limpo
+# Fluxo do pedido à prova
 
-## Exemplo completo: "entrega de dever de casa"
+`onp-spec` abrevia `node <dir-desta-skill>/scripts/onp-spec.mjs`, executado na
+raiz do projeto. Os exemplos funcionam em terminais Windows, Linux e macOS
+com Node e Git disponíveis; não precisam de Bash.
 
-> `onp-spec <cmd>` abrevia `node <dir-desta-skill>/scripts/onp-spec.mjs <cmd>`,
-> sempre a partir da RAIZ do projeto (motor embarcado — nada a instalar).
-
-```bash
-# 1. inicializa o projeto (uma vez)
-onp-spec init --preset lgpd-educacao
-
-# 2. nova feature
-onp-spec new entrega-dever-casa
+```text
+onp-spec init
+onp-spec new entrega-dever-casa --grande --cliente "Alunos devem entregar o dever dentro do prazo."
+onp-spec harness --agents <harness-atual>
 ```
 
-Edite `.spec/features/entrega-dever-casa/spec.md`:
+O exemplo cria uma feature nova. Para trabalho existente, preserve documentos,
+planos e contratos; não imponha PRD/ADR/TDD retroativamente. Revisão solicitada
+vira proposta separada conforme [preservacao.md](preservacao.md).
+Complete pesquisa, PRD, ADR, TDD, spec e tarefas novos; eles são vinculados.
+No PRD mantenha a frase original, e na spec transforme-a em um cenário claro:
 
 ```markdown
-# Spec: Entrega de dever de casa
-
-> feature: entrega-dever-casa
-> status: em-implementacao
-
-## Histórias
-
 ### US-001 — Aluno entrega dentro do prazo
-
 Como aluno, quero enviar meu dever antes do prazo, para que conte como no prazo.
 
-#### AC-001 — Entrega antes do prazo é "no prazo"
-
-- **Dado** um aluno autenticado com uma tarefa aberta
-- **Quando** ele envia o arquivo antes do horário-limite
-- **Então** a entrega é registrada com status "no prazo"
-
-#### AC-002 — Entrega após o prazo é "atrasada"
-
-- **Dado** um aluno autenticado com uma tarefa aberta
-- **Quando** ele envia depois do horário-limite
-- **Então** a entrega é registrada com status "atrasada"
-
-## Suposições
-
-| ID | Suposição | Status | Resolução |
-|---|---|---|---|
-| ASM-001 | Trabalho não pode ser reenviado após correção | aberta | — |
-
-## Perguntas em aberto
-
-| ID | Pergunta | Status | Resposta |
-|---|---|---|---|
-| Q-001 | Qual fuso horário define o prazo? | aberta | — |
+#### AC-001 — Entrega dentro do prazo é aceita
+- **Dado** um aluno autenticado com tarefa aberta
+- **Quando** envia o arquivo antes do horário-limite
+- **Então** a entrega fica registrada como dentro do prazo
 ```
 
-```bash
-# 3. cada critério de aceite vira um teste executável (a definição de pronto)
+Pergunte pelo fuso e regras de atraso quando não estiverem definidos. Consulte
+PRD/ADRs existentes de avaliação e entrega como entradas de leitura antes de
+mudar essas regras; registre impacto, pergunta e resposta na proposta nova,
+preservando os originais. Não decida isso silenciosamente à noite.
+
+```text
 onp-spec scaffold entrega-dever-casa
-# → cria test/entrega-dever-casa.spec.test.js com testes que FALHAM
-#   (inclui esqueletos p/ princípios da constituição com verificação(teste))
+onp-spec plano entrega-dever-casa --agents <harness-atual>
 ```
 
-## Paralelizando: `onp-spec plano` (2+ tarefas pendentes)
+Apresente faixas de arquivos independentes, modelos realmente disponíveis e
+esforços suportados. Reutilize a autorização do cliente ou solicite a escolha
+nativa quando faltar. `--paralelizar T-001,T-003` limita as tarefas paralelas;
+`--sequencial` executa em ordem. O estado vai ao plano/tarefas nativos.
 
-Com as tarefas escritas em `tasks.md` (com `Arquivos:` honestos), o motor
-monta o plano de execução:
-
-```bash
-onp-spec plano entrega-dever-casa
+```text
+onp-spec executar entrega-dever-casa
 ```
 
-- Tarefas de **arquivos disjuntos** viram **faixas paralelas**: 1 faixa =
-  1 git worktree + 1 branch (`spec/<feature>-faixa-N`) + 1 janela de contexto
-  limpa. Tarefas que compartilham arquivo caem na mesma faixa, em sequência;
-  tarefa sem `Arquivos:` roda sozinha ao final.
-- Campos opcionais por tarefa em tasks.md: `- Modelo: claude-sonnet-5` e
-  `- Esforço: alto` (baixo|medio|alto|xalto|max) — o plano usa nos executores.
-- Sai sempre `plano-execucao.md` (faixas, ondas, gestão de branches/commits,
-  ordem de merge e gate final). Na skill do **Claude Code**, saem também
-  `executar-tarefas.sh` (claude headless em paralelo, com `--model`/`--effort`
-  por tarefa) e `plano-execucao.html` (visual, com o botão "Executar todas as
-  tarefas em janelas limpas e paralelas"). Na skill do **Antigravity**, o
-  plano traz um prompt pronto por faixa para os agentes paralelos nativos.
-- A gestão de commits é do plano: **1 tarefa = 1 commit** (`T-003 <feature>:
-  <título>`), merges `--no-ff` de volta na branch de trabalho `spec/<feature>`,
-  e o gate final (verify + audit) roda depois de tudo mesclado.
+`executar <feature>` usa o plano nativo mais recente; acrescente `--run <id>`
+para selecionar a mesma execução após criar outra versão. Se já existiam
+artefatos, o plano novo fica em `execucoes/<runId>/`; os anteriores permanecem.
 
-Regenere o plano sempre que tasks.md ou a config `paralelo` mudarem — os
-artefatos avisam que não devem ser editados à mão.
+O executor salva progresso, pausa ao atingir a reserva de cota, aguarda o reset
+e consulta novamente antes de continuar. Não apague uma execução pausada para
+“recomeçar limpo”. Se o processo foi encerrado, retome o checkpoint pela mesma
+execução. Quando não existe telemetria, a limitação é explícita e requer fonte
+nativa confiável. Sem leitura inicial recente, o despacho é bloqueado
+(`QUOTA_UNAVAILABLE`); o valor não é adivinhado.
 
-Agora implemente a lógica e preencha os testes (ou deixe o plano executar). Rode:
+Falha localizada: inspecione log, alterações parciais e estado real; use
+`executar <feature> --faixa <id>` ou `--seq <T-xxx>` sem repetir as concluídas.
+Problema de domínio exige pergunta, não retry automático.
 
-```bash
-# 4. o runner prova (ou não) — teste PULADO não conta como prova
+```text
 onp-spec verify entrega-dever-casa
-
-# 5. o gate — cole a saída; exit 0 ou não está pronto
 onp-spec audit --ci
+onp-spec licoes sugerir
+onp-spec worktrees entrega-dever-casa
 ```
 
-## A tabela de status
+PASS atual + audit exit 0 permitem concluir. Compartilhe prova e notifique
+pelo harness se habilitado. No fim da sessão, pergunte se o cliente quer limpar
+os worktrees apresentados, identificados pelo `runId` desta sessão. Só execute
+`worktrees <feature> --run <id> --limpar --confirmar` após autorização; preserve trabalho ativo, sujo ou não integrado. Sem resposta,
+manter é obrigatório. Uma espera de cota não é fim da execução nem motivo para
+apagar seus worktrees.
 
-Rode `onp-spec status` a qualquer momento:
-
-```
-feature                        status             critérios  com-teste  provados  suposições?  perguntas?
-────────────────────────────────────────────────────────────────────────────────────────────────────────
-entrega-dever-casa             em-implementacao           2          2         1            1           1
-```
-
-Lê-se: 2 critérios de aceite, ambos com teste anotado, mas só 1 provado até
-agora; 1 suposição e 1 pergunta ainda abertas. A feature **não pode** ir para
-`implementada` com a suposição ASM-001 aberta — o audit vai bloquear com
-"suposição em aberto" (`ASM_ABERTA`).
-
-## Integração com CI
-
-No seu pipeline (GitHub Actions, GitLab CI):
-
-No CI você pode usar o mesmo motor embarcado (commitado junto com a skill) ou
-o pacote npm `@onovoprogramador/onp-spec` (modo CI):
-
-```yaml
-- run: node .claude/skills/onp-spec-driven/scripts/onp-spec.mjs verify entrega-dever-casa
-- run: node .claude/skills/onp-spec-driven/scripts/onp-spec.mjs audit --ci
-```
-
-## Por que isso mata o vibecoding
-
-O agente de IA não consegue dizer "implementei tudo" e passar batido: se um
-critério de aceite não tem teste, o audit acusa; se o teste nunca passou, o
-audit acusa; se o agente renomeou um requisito e esqueceu o teste, o audit
-acusa teste órfão (`TESTE_ORFAO`); se o agente PULOU o teste (skip/todo), o
-verify recusa a prova e o audit acusa critério sem prova (`AC_SEM_PROVA`). A
-prova não é a palavra do agente — é o exit code.
+CI usa o mesmo motor: execute `verify` e `audit --ci`. Teste pulado, prova
+antiga e requisito sem teste não são conclusão. Consulte `status`, `assumptions`
+e `resumo` quando precisar inspecionar o estado; não é necessário abrir painel.

@@ -1,0 +1,59 @@
+{
+  "runId": "legacy-09-claude",
+  "feature": "legacy",
+  "agent": "claude",
+  "modo": "paralelo",
+  "paralelizar": [
+    "T-001"
+  ],
+  "modeloForcado": null,
+  "esforcoForcado": null,
+  "geradoEm": "2026-10-01 00:00",
+  "branchTrabalho": "spec/legacy",
+  "baseDir": ".spec/features/legacy",
+  "specDir": ".spec",
+  "repoName": "legacy-project",
+  "logsDir": "../onp-worktrees/legacy-project-legacy-logs",
+  "ondas": [
+    [
+      "faixa-1"
+    ]
+  ],
+  "faixas": [
+    {
+      "id": "faixa-1",
+      "branch": "spec/legacy-faixa-1",
+      "worktree": "../onp-worktrees/legacy-project-legacy-faixa-1",
+      "tarefas": [
+        {
+          "id": "T-001",
+          "titulo": "Implementar valor",
+          "modelo": "legacy-model",
+          "esforco": "medium",
+          "arquivos": [
+            "src/value.js"
+          ],
+          "refs": [
+            "AC-001"
+          ]
+        }
+      ]
+    }
+  ],
+  "sequenciais": [
+    {
+      "id": "T-002",
+      "titulo": "Revisar documentação",
+      "modelo": "legacy-model",
+      "esforco": "medium",
+      "arquivos": [
+        "docs/result.md"
+      ],
+      "refs": [
+        "AC-001"
+      ]
+    }
+  ],
+  "concluidas": [],
+  "avisos": []
+}

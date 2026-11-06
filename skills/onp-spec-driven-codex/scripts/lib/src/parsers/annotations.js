@@ -60,7 +60,13 @@ export function walkFiles(rootDir, { includeGlobs, ignoreGlobs }) {
     }
   }
 
-  const walkRoots = new Set(includeGlobs.map((g) => path.resolve(rootDir, staticDirOf(g))));
+  // Se um glob já percorre o ancestral, não percorra suas subárvores de novo.
+  const roots = [...new Set(includeGlobs.map((g) => path.resolve(rootDir, staticDirOf(g))))];
+  const walkRoots = roots.filter((candidate) => !roots.some((other) => {
+    if (candidate === other) return false;
+    const rel = path.relative(other, candidate);
+    return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+  }));
   for (const root of walkRoots) walk(root);
 
   return [...found].sort();

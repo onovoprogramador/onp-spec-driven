@@ -10,7 +10,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex', 'onp-spec-driven-cursor'];
+export const SKILLS = ['onp-spec-driven', 'onp-spec-driven-antigravity', 'onp-spec-driven-codex', 'onp-spec-driven-cursor', 'onp-spec-driven-opencode'];
+export const RUNTIME_PACKAGE = `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`;
 export const ENTRY = `#!/usr/bin/env node
 // Entrypoint do motor embarcado da skill onp-spec-driven.
 // Uso (a partir da RAIZ do projeto do usuário):
@@ -37,6 +38,7 @@ export function buildSkillDir(scriptsDir) {
     recursive: true,
     filter: (src) => !src.includes(`${path.sep}agents`),
   });
+  writeFileSync(path.join(scriptsDir, 'lib', 'package.json'), RUNTIME_PACKAGE);
   writeFileSync(path.join(scriptsDir, 'onp-spec.mjs'), ENTRY);
   return scriptsDir;
 }
@@ -47,7 +49,9 @@ export function buildSkill() {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const outs = buildSkill();
-  for (const out of outs) {
-    console.log(`✔ motor embarcado gerado em ${path.relative(ROOT, out)}/`);
+  if (!process.argv.includes('--quiet')) {
+    for (const out of outs) {
+      console.log(`✔ motor embarcado gerado em ${path.relative(ROOT, out)}/`);
+    }
   }
 }

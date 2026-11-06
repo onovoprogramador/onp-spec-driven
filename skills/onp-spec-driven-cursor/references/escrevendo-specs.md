@@ -1,5 +1,9 @@
 # Escrevendo especificações auditáveis
 
+Este guia orienta especificações novas e propostas de revisão separadas.
+Não reescreva specs existentes para adequá-las a este guia; consulte
+[preservacao.md](preservacao.md).
+
 ## Um critério de aceite precisa ser observável
 
 O motor de auditoria não entende prosa — ele entende testes. Então cada
@@ -54,7 +58,7 @@ formato canônico é `- **Dado** ...`. Use `E` para continuar a última:
 Regra dura: uma feature não vira `implementada`/`auditada` com suposição
 `aberta`. Isso força a conversa "olha, assumi X — é isso mesmo?" antes de
 considerar pronto. Se o usuário estiver na conversa, pergunte na hora
-(AskUserQuestion) em vez de deixar a suposição envelhecer.
+(pela ferramenta nativa de perguntas do harness) em vez de deixar a suposição envelhecer.
 
 Regra mais dura ainda: a AUSÊNCIA das seções `## Suposições` e
 `## Perguntas em aberto` também é problema (`SECAO_AUSENTE` — erro com a spec
@@ -91,9 +95,11 @@ rascunho → pronta → em-implementacao → implementada → auditada
   campo que decide o que o plano de execução roda EM PARALELO (arquivos
   disjuntos) e o que roda em sequência (arquivo compartilhado).
 - `Modelo:` e `Esforço:` (opcionais) — usados por `onp-spec plano` para o
-  executor da tarefa: `- Modelo: claude-opus-5` · `- Esforço: alto`
+  executor da tarefa: `- Modelo: <id-disponivel-no-harness>` · `- Esforço: alto`
   (baixo|medio|alto|xalto|max). Sem eles, valem os defaults da config
-  (`paralelo.model`, `paralelo.esforco`).
+  (`paralelo.model`, `paralelo.esforco`), validados contra as capacidades
+  e modelos disponíveis no harness antes da execução. Não deduza acesso pela
+  família do nome do modelo.
 - Status: `[pendente]` / `[em-andamento]` / `[concluida]` — acentos e
   maiúsculas tolerados (`[Concluída]` conta); token fora da lista é "status de
   tarefa inválido" (`TASK_STATUS_INVALIDO`, erro), nunca ignorado em silêncio.

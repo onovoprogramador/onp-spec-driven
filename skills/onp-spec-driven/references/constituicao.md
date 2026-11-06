@@ -67,10 +67,3 @@ precisam apontar pros seus arquivos. Guard-rails do motor:
   (`VERIFICACAO_MALFORMADA`), não trava o gate;
 - o esqueleto dos testes de princípio (`verificação(teste)`) nasce no
   `scaffold`, junto com os testes dos critérios de aceite.
-
-## Rastreabilidade que dá diferencial de segurança
-
-Um estudo de caso de microsserviços bancários relatou 73% menos defeitos de
-segurança quando os princípios eram rastreados até arquivo e linha. É exatamente
-o que `verificação(proibido)` e `verificação(obrigatório)` fazem: cada violação
-sai com `arquivo:linha`, não com "reveja o código".

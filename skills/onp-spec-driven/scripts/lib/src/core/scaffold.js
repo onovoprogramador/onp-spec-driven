@@ -3,7 +3,7 @@
 // até ser implementado. O título carrega @spec:AC-xxx; o corpo carrega
 // o Dado/Quando/Então da spec como roteiro.
 
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { allAcs } from '../parsers/spec.js';
 
@@ -15,12 +15,33 @@ function detectStyle(config) {
   return 'node';
 }
 
-function jsHeader(style) {
+// .js segue o package.json mais próximo do arquivo, inclusive um escopo
+// próprio em test/. Sem type: module, Node 18 exige CommonJS explícito.
+function nodeModuleType(outDir) {
+  let dir = path.resolve(outDir);
+  for (;;) {
+    const manifest = path.join(dir, 'package.json');
+    if (existsSync(manifest)) {
+      let pkg;
+      try { pkg = JSON.parse(readFileSync(manifest, 'utf8')); }
+      catch (error) { throw new Error(`${manifest} inválido: ${error.message}`); }
+      return pkg.type === 'module' ? 'module' : 'commonjs';
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return 'commonjs';
+    dir = parent;
+  }
+}
+
+function jsHeader(style, outDir) {
   if (style === 'vitest') {
     return `import { test } from 'vitest';\n`;
   }
   if (style === 'jest') {
     return '';
+  }
+  if (nodeModuleType(outDir) === 'commonjs') {
+    return `const { test } = require('node:test');\nconst assert = require('node:assert/strict');\n`;
   }
   return `import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n`;
 }
@@ -115,7 +136,7 @@ export function scaffoldTests(project, featureName, { force = false } = {}) {
       .join('');
     content += '\n';
   } else {
-    content = `// Testes de spec da feature ${featureName} — gerados por onp-spec scaffold\n${jsHeader(style)}\n`;
+    content = `// Testes de spec da feature ${featureName} — gerados por onp-spec scaffold\n${jsHeader(style, outDir)}\n`;
     content += pending.map(({ story, ac }) => renderJsTest(style, story, ac)).join('\n\n');
     content += pendingPrinciples
       .map(({ principle, tag }) => `\n\n${renderJsPrinciple(style, principle, tag)}`)

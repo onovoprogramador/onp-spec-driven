@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1952" viewBox="0 0 1440 1952" role="img" aria-labelledby="title description">
+  <title id="title">ONP Spec 0.10.0 — atualizações do projeto</title>
+  <desc id="description">Resumo visual da atualização: performance medida localmente; preservação de arquivos e compatibilidade 0.9; documentação conectada para novas especificações grandes; pausa com reserva de 5%, checkpoint e retomada após consulta de cota; ferramentas nativas, notificações ativadas e limpeza de worktrees somente após pergunta. Checkpoint de 6 de novembro de 2026: 343 testes passaram em cada uma das versões Node 18 e 22 no macOS. No checkpoint informado, a publicação npm ainda estava pendente.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; }
+      .ink { fill: #142a35; }
+      .muted { fill: #52666e; }
+      .green { fill: #006c50; }
+      .white { fill: #ffffff; }
+      .soft { fill: #b9ced2; }
+      .label { font-size: 18px; font-weight: 700; letter-spacing: 1.6px; }
+      .heading { font-size: 31px; font-weight: 700; letter-spacing: -0.6px; }
+      .body { font-size: 23px; }
+      .small { font-size: 19px; }
+      .note { font-size: 20px; }
+      .number { font-size: 58px; font-weight: 700; letter-spacing: -1.8px; }
+      .rule { stroke: #dce5e3; stroke-width: 1.5; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ebba6"/>
+    </marker>
+  </defs>
+
+  <rect width="1440" height="1952" fill="#f3f6f2"/>
+  <rect x="64" y="58" width="52" height="52" rx="14" fill="#006c50"/>
+  <path d="M85 74 L76 84 L85 94 M95 74 L104 84 L95 94" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="132" y="91" class="label ink">O NOVO PROGRAMADOR</text>
+  <rect x="1160" y="64" width="216" height="40" rx="20" fill="#e0ece4"/>
+  <text x="1268" y="90" text-anchor="middle" class="label green">ONP SPEC · 0.10.0</text>
+
+  <text x="64" y="204" font-size="76" font-weight="700" letter-spacing="-3" class="ink">O que mudou.</text>
+  <text x="64" y="258" font-size="32" class="muted">O trabalho evolui. O histórico permanece.</text>
+  <text x="64" y="302" class="note muted">Motor 0.10.0 <tspan fill="#99aaa6"> / </tspan> Skills 4.0.0 <tspan fill="#99aaa6"> / </tspan> 5 ambientes de execução</text>
+
+  <!-- Medição e preservação -->
+  <rect x="64" y="342" width="644" height="350" rx="22" fill="#ffffff" stroke="#dce5e3"/>
+  <text x="96" y="383" class="label green">01 / PERFORMANCE MEDIDA</text>
+  <text x="96" y="429" class="heading ink">6.000 tarefas independentes</text>
+  <text x="96" y="493" class="number ink">311,10<tspan dx="8" font-size="23" font-weight="400" letter-spacing="0">ms</tspan></text>
+  <path d="M369 474 H411 M402 465 L411 474 L402 483" fill="none" stroke="#6f8588" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="443" y="493" class="number green">6,78<tspan dx="8" font-size="23" font-weight="400" letter-spacing="0">ms</tspan></text>
+  <text x="96" y="529" class="note muted">Agrupamento anterior</text>
+  <text x="443" y="529" class="note muted">Plano atual completo</text>
+  <line x1="96" y1="553" x2="676" y2="553" class="rule"/>
+  <text x="96" y="584" class="small muted">Medianas de 7 amostras, após aquecimento.</text>
+  <text x="96" y="614" class="small muted">macOS · M1 Pro · Node 22.14.0 · 06 nov 2026</text>
+  <text x="96" y="654" class="small ink">Cenário sintético; não mede latência de produto.</text>
+
+  <rect x="732" y="342" width="644" height="350" rx="22" fill="#e7f0e9" stroke="#c9ded0"/>
+  <text x="764" y="383" class="label green">02 / COMPATIBILIDADE 0.9</text>
+  <text x="764" y="429" class="heading ink">Seus arquivos ficam intactos.</text>
+  <circle cx="773" cy="478" r="5" fill="#006c50"/>
+  <text x="793" y="486" class="body ink">Specs, documentos, scripts e HTML antigos.</text>
+  <circle cx="773" cy="526" r="5" fill="#006c50"/>
+  <text x="793" y="534" class="body ink">Novas skills e planos em versões separadas.</text>
+  <circle cx="773" cy="574" r="5" fill="#006c50"/>
+  <text x="793" y="582" class="body ink">Sem exigências documentais retroativas.</text>
+  <line x1="764" y1="611" x2="1344" y2="611" stroke="#c4d9cb" stroke-width="1.5"/>
+  <text x="764" y="650" class="note green">Revisões solicitadas viram propostas separadas.</text>
+
+  <!-- Fluxo documental -->
+  <rect x="64" y="720" width="1312" height="362" rx="22" fill="#142f38"/>
+  <text x="96" y="762" class="label" fill="#9bdfc9">03 / DOCUMENTAÇÃO CONECTADA</text>
+  <text x="96" y="808" class="heading white">Para novas especificações grandes.</text>
+  <text x="96" y="844" class="note soft">Pedido do cliente, decisões e implementação com referências entre todos os documentos.</text>
+  <g transform="translate(96 873)">
+    <rect width="190" height="108" rx="12" fill="#23434b"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">Research</text>
+    <text x="18" y="75" font-size="19" class="soft">Dados e fontes</text>
+    <path d="M194 54 H205" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+  <g transform="translate(306 873)">
+    <rect width="190" height="108" rx="12" fill="#23434b"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">PRD</text>
+    <text x="18" y="75" font-size="19" class="soft">Voz do cliente</text>
+    <path d="M194 54 H205" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+  <g transform="translate(516 873)">
+    <rect width="190" height="108" rx="12" fill="#23434b"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">ADR</text>
+    <text x="18" y="75" font-size="19" class="soft">Decisões e regras</text>
+    <path d="M194 54 H205" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+  <g transform="translate(726 873)">
+    <rect width="190" height="108" rx="12" fill="#28564e"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">TDD</text>
+    <text x="18" y="75" font-size="19" fill="#c6e9dc">Design completo</text>
+    <path d="M194 54 H205" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+  <g transform="translate(936 873)">
+    <rect width="190" height="108" rx="12" fill="#23434b"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">Specs</text>
+    <text x="18" y="75" font-size="19" class="soft">Critérios testáveis</text>
+    <path d="M194 54 H205" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+  <g transform="translate(1146 873)">
+    <rect width="198" height="108" rx="12" fill="#23434b"/>
+    <text x="18" y="40" font-size="28" font-weight="700" class="white">Tarefas</text>
+    <text x="18" y="75" font-size="19" class="soft">Código e prova</text>
+  </g>
+  <path d="M98 1017 H108 M103 1012 V1022" fill="none" stroke="#9bdfc9" stroke-width="2"/>
+  <text x="121" y="1025" class="note white">Impacto em domínio anterior exige aviso e pergunta antes da execução.</text>
+  <text x="96" y="1058" class="small soft">Research distingue evidências de hipóteses; dados insuficientes produzem conclusão inconclusiva.</text>
+
+  <!-- Execução com cota / recursos nativos -->
+  <rect x="64" y="1110" width="764" height="438" rx="22" fill="#ffffff" stroke="#dce5e3"/>
+  <text x="96" y="1152" class="label green">04 / CONTINUIDADE COM CONTROLE</text>
+  <text x="96" y="1198" class="heading ink">Reserva de 5% para pausar.</text>
+  <g transform="translate(96 1230)">
+    <rect width="212" height="112" rx="12" fill="#edf3ef"/>
+    <text x="18" y="37" font-size="25" font-weight="700" class="green">Pausar</text>
+    <text x="18" y="70" class="note ink">Parar despachos</text>
+    <text x="18" y="97" class="note ink">Salvar checkpoint</text>
+  </g>
+  <path d="M316 1286 H332" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  <g transform="translate(340 1230)">
+    <rect width="212" height="112" rx="12" fill="#edf3ef"/>
+    <text x="18" y="37" font-size="25" font-weight="700" class="green">Aguardar</text>
+    <text x="18" y="70" class="note ink">Timer e reset</text>
+    <text x="18" y="97" class="note ink">Estado preservado</text>
+  </g>
+  <path d="M560 1286 H576" stroke="#6ebba6" stroke-width="2" marker-end="url(#arrow)"/>
+  <g transform="translate(584 1230)">
+    <rect width="212" height="112" rx="12" fill="#e0eee5"/>
+    <text x="18" y="37" font-size="25" font-weight="700" class="green">Revalidar</text>
+    <text x="18" y="70" class="note ink">Consultar a cota</text>
+    <text x="18" y="97" class="note ink">Retomar se livre</text>
+  </g>
+  <text x="96" y="1382" class="body ink">Retoma com liberação verificada, sem repetir sucesso.</text>
+  <text x="96" y="1422" class="note muted">Sem telemetria, o despacho inicial fica bloqueado.</text>
+  <text x="96" y="1452" class="note muted">Timers exigem processo ou agendamento operante.</text>
+  <line x1="96" y1="1472" x2="796" y2="1472" class="rule"/>
+  <text x="96" y="1502" class="small muted">Garantias do novo executor. Scripts antigos mantêm</text>
+  <text x="96" y="1527" class="small muted">o comportamento original.</text>
+
+  <rect x="852" y="1110" width="524" height="438" rx="22" fill="#e7f0e9" stroke="#c9ded0"/>
+  <text x="884" y="1152" class="label green">05 / RECURSOS NATIVOS</text>
+  <text x="884" y="1198" class="heading ink">Sem painel próprio novo.</text>
+  <text x="884" y="1242" class="body ink">Plano e tarefas por eventos.</text>
+  <text x="884" y="1280" class="body ink">Modelos disponíveis na conta.</text>
+  <text x="884" y="1326" class="body ink">Avisos de conclusão quando</text>
+  <text x="884" y="1356" class="body ink">notificações estão ativadas.</text>
+  <line x1="884" y1="1382" x2="1344" y2="1382" stroke="#c4d9cb" stroke-width="1.5"/>
+  <text x="884" y="1422" font-size="24" font-weight="700" class="green">Ao encerrar, perguntar antes</text>
+  <text x="884" y="1454" font-size="24" font-weight="700" class="green">de limpar os worktrees.</text>
+  <text x="884" y="1500" class="small ink">Ativos, sujos ou sem integração ficam.</text>
+
+  <!-- Evidência / estado da publicação -->
+  <rect x="64" y="1576" width="1312" height="256" rx="22" fill="#142f38"/>
+  <text x="96" y="1620" class="label" fill="#9bdfc9">06 / VERIFICAÇÃO REGISTRADA</text>
+  <text x="96" y="1690" class="number white">343/343</text>
+  <text x="367" y="1689" class="body soft">Node 18.20.8</text>
+  <line x1="558" y1="1649" x2="558" y2="1712" stroke="#45616a" stroke-width="1.5"/>
+  <text x="594" y="1690" class="number white">343/343</text>
+  <text x="866" y="1689" class="body soft">Node 22.14.0</text>
+  <rect x="1068" y="1648" width="276" height="70" rx="12" fill="#ffe3a0"/>
+  <text x="1206" y="1677" text-anchor="middle" font-size="21" font-weight="700" fill="#573d06">npm</text>
+  <text x="1206" y="1704" text-anchor="middle" font-size="20" fill="#573d06">Pré-publicação</text>
+  <text x="96" y="1761" class="note white">Checkpoint local: 06 nov 2026, 13:09 · São Paulo · macOS</text>
+  <text x="96" y="1798" class="small soft">CI multiplataforma configurada; resultados remotos ainda não comprovados.</text>
+
+  <text x="64" y="1883" class="label green">ONP SPEC / 0.10.0</text>
+  <text x="64" y="1914" class="small muted">Fontes: RELEASE-0.10.0.md e benchmark/PERFORMANCE.md · Resumo estático da atualização</text>
+  <text x="1376" y="1914" text-anchor="end" class="small muted">06.11.2026</text>
+</svg>

@@ -1,17 +1,13 @@
 # Arquitetura — onp-spec-driven
 
 > Documento interno de design. Atualizado conforme o projeto evolui.
-> Status do build: ver PROGRESS.md
+> Compatibilidade e prova: `npm test`; fontes dos harnesses nas referências das skills.
 
 ## Tese
 
-Todas as ferramentas de SDD existentes são **spec-first**: a spec gera o código e depois vira mentira.
-A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, mecanicamente, em CI.
-
-| Concorrente | O que faz | O que NÃO faz |
-|---|---|---|
-| spec-kit (GitHub) | Templates ricos (US priorizadas, given-when-then, FR-xxx), CLI de scaffolding em Python | Testes são OPCIONAIS no template; nenhuma verificação mecânica; constituição é só prompt |
-| OpenSpec | Validador estrutural real (zod + parser md): SHALL/MUST presente, cenários existem, deltas bem-formados | Nunca liga requisito → teste → código; não detecta drift |
+A onp-spec-driven mantém ligações auditáveis entre requisitos, tarefas, testes
+e implementação. Pesquisa e comparação de concorrentes precisam de fontes
+atuais e escopo explícito; o benchmark local mede apenas seus cenários.
 
 ## Os 5 diferenciais (critérios de aceite do produto)
 
@@ -34,27 +30,43 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 
 - Node.js >= 18, ESM puro, **zero dependências**.
 - Testes da própria lib: `node:test` nativo.
-- **A skill é o artefato principal**, autossuficiente, em QUATRO variantes com
+- **A skill é o artefato principal**, autossuficiente, em CINCO variantes com
   o MESMO motor e a MESMA versão (`skills/onp-spec-driven/` para Claude Code,
   `skills/onp-spec-driven-codex/` para Codex, `skills/onp-spec-driven-cursor/`
-  para Cursor, `skills/onp-spec-driven-antigravity/` para Antigravity;
+  para Cursor, `skills/onp-spec-driven-antigravity/` para Antigravity e
+  `skills/onp-spec-driven-opencode/` para OpenCode;
   marcador `agent:` no frontmatter evita instalar a errada):
   - `SKILL.md` + `references/` — contrato do agente: fluxo
     Especificar → Projetar → Tarefas → Executar → **Auditar**, loop de correção
-    limitado a 3 iterações, 1 task = 1 commit, gate com saída colada.
+    com diagnóstico de falhas repetidas, commits rastreáveis e gate com prova atual.
   - `scripts/` — **motor mecânico embarcado** (gerado de `src/` por
     `node tools/build-skill.mjs`; `test/skill-sync.test.js` acusa drift).
     Instalar = copiar a pasta para `.claude/skills/` (Claude Code),
     `.cursor/skills/` (Cursor — Agent Skills nativas desde o Cursor 2.4; o
     `name:` do frontmatter TEM que ser igual ao nome da pasta) ou
     `.agents/skills/` (Codex e Antigravity — compartilham o diretório, por
-    isso o marcador). Sem npm, sem npx.
+    isso o marcador), ou `.opencode/skills/` para OpenCode. Sem npm, sem npx.
 - A **CLI npm** (`bin/onp-spec.js` → `src/`) continua existindo como modo CI
   (`@onovoprogramador/onp-spec`); consome o MESMO `src/`.
 - Design da refatoração skill-first: `docs/TDD-skill-harness.md`; achados que a
   motivaram: `docs/ACHADOS-teste-exaustivo.md`.
 
-## Formato dos artefatos (.spec/)
+## Preservação e compatibilidade
+
+Instalação e atualização preservam arquivos existentes do usuário, inclusive
+customizações da skill. Uma instalação diferente do mesmo harness usa uma
+pasta/nome versionados ao lado; não há mescla automática. Não se exige converter
+specs, adicionar PRD/ADR/TDD ou regenerar planos antigos para adotar a atualização.
+Revisões solicitadas de documentos existentes são propostas em versões separadas,
+preservando os originais. Os domínios anteriores são entradas de leitura para
+revisar o impacto do trabalho novo, sem inclusão automática de links neles.
+
+Os novos contratos documentais dependem de marcação explícita na criação de
+artefatos novos; a presença isolada de um `design.md` antigo não ativa uma
+migração nem novas exigências retroativas. A execução autorizada e os registros
+operacionais de estado/prova continuam distintos de uma migração documental.
+
+## Formato dos artefatos novos (.spec/)
 
 ```
 .spec/
@@ -66,7 +78,15 @@ A onp-spec-driven é **spec-anchored**: a spec é auditável contra o código, m
 └── features/<nome>/
     ├── spec.md              # US-xxx, AC-xxx (Dado/Quando/Então), ASM-xxx, Q-xxx
     ├── tasks.md             # T-xxx com Refs: e Arquivos:
-    └── design.md            # opcional (features grandes)
+    ├── prd.md               # grande: pedido literal, metas e restrições
+    ├── adr.md               # grande: decisões e consequências
+    ├── design.md            # grande: TDD completo; completo também se criado à parte
+    ├── research.md          # grande: fontes, dados, incerteza e recomendação
+    ├── governance.json      # revisão de impacto, decisões e frescor
+    └── execucoes/<runId>/    # novos planos quando há artefatos anteriores
+        ├── plano.json
+        ├── plano-execucao.md
+        └── executar-tarefas.mjs
 ```
 
 ### spec.md (gramática mínima parseável)
@@ -171,103 +191,74 @@ a AC com teste anotado, e sempre com o aviso PROVA_FRACA.
 Verify roda o comando, extrai resultado POR TESTE, casa títulos com `@spec:AC-xxx` e grava
 `.spec/verification/<feature>.json` com {ac, status, teste, timestamp, gitRev}. Audit consome isso.
 
-## Plano de execução (src/core/plano.js)
+## Governança (src/core/governance.js)
 
-`onp-spec plano <feature>` transforma o tasks.md em faixas de execução:
-tarefas com `Arquivos:` **disjuntos** viram faixas PARALELAS (componentes
-conexos do grafo de conflito de arquivos — 1 faixa = 1 git worktree + 1
-branch `spec/<feature>-faixa-N` + 1 janela de contexto limpa); tarefas que
-compartilham arquivo caem na mesma faixa em sequência; tarefa sem `Arquivos:`
-roda sozinha ao final na árvore principal. `paralelo.maxParalelas` (config,
-default 3) divide as faixas em ondas. `Modelo:`/`Esforço:` por tarefa (ou
-defaults `paralelo.model`/`paralelo.esforco`) alimentam o executor.
+`new <feature> --grande` cria uma feature nova com PRD, ADR, design/TDD,
+research, spec e tasks ligados entre si. Documentos existentes permanecem
+intactos, sem novos links ou requisitos retroativos. A versão literal do pedido do cliente fica separada da
+interpretação do agente. O template de TDD cobre arquitetura, interfaces,
+dados, riscos, segurança, capacidade, testes, observabilidade e implantação.
 
-O cálculo é agnóstico de agente; os artefatos variam (`--agents`, com
-auto-detecção: 1º o marcador `agent:` da própria skill embarcada, 2º o
-caminho do motor (`.codex`/`.cursor/skills`/`.agents`/`.claude` — um
-checkout em `~/.cursor/worktrees/<repo>` NÃO conta como cursor), 3º a skill
-instalada no projeto com precedência `.claude` → `.agents` → `.cursor`;
-com mais de uma skill instalada, vale essa ordem — na dúvida, use a flag):
+O agente revisa semanticamente contratos e domínios antes de tarefas que
+alteram comportamento. Para os novos artefatos sujeitos ao contrato, o motor
+exige registro de revisão, detecta referências faltantes e invalida
+decisões/revisões quando suas entradas mudam. Impacto em
+domínio anterior ou conflito com PRD/ADR vira pergunta nativa ao cliente antes
+da execução dependente. Ausência de conflito mecânico não prova compatibilidade
+semântica. Research identifica fonte/data, amostra, viés e incerteza; falta de
+dados é inconclusão, não licença para inventar estatística.
 
-- **sempre**: `plano-execucao.md` — faixas/ondas, gestão de branches e
-  commits (1 tarefa = 1 commit `T-xxx <feature>: título`; merge `--no-ff` na
-  branch de trabalho `spec/<feature>`; gate final verify + audit).
-- **claude**: `executar-tarefas.sh` (headless: `claude -p` por tarefa com
-  `--model`/`--effort` + `--output-format stream-json --verbose`,
-  permission-mode `paralelo.permissionMode` default acceptEdits + allowedTools
-  derivada do testCommand; valida ambiente e árvore limpa; auto-commita
-  artefatos do plano; mescla, marca `[concluida]` via `onp-spec tarefa`, fecha
-  a contabilidade no git e roda o gate) e `plano-execucao.html` (visual,
-  somente leitura).
+## Plano e execução (src/core/plano.js + src/core/executor.js)
 
-  O script é um **dispatcher**, não um roteiro linear: cada faixa e cada
-  sequencial é uma função, então `--faixa <id>` reexecuta só a que falhou
-  (limpando worktree e branch da tentativa anterior antes de recriar),
-  `--seq <T-xxx>` refaz uma sequencial, `--gate` roda só o veredito e
-  `--listar` mostra os alvos. Cada tentativa é contada e vai para o ledger.
-  Enquanto roda, um loop em background imprime no terminal, a cada ~1 min, o
-  **resumo geral de andamento** (via `claude -p`, modelo `paralelo.resumoModel`
-  default haiku; fallback determinístico) e o grava no ledger — no exit, um
-  trap (`pkill -P` no loop, senão o `sleep` órfão segura o stdout de quem
-  chamou via pipe) registra o resumo final.
-- **codex**: MESMOS artefatos e MESMO dispatcher do claude, trocando o CLI:
-  cada tarefa roda `codex exec` com `--model` +
-  `-c model_reasoning_effort=<nível>` (o nível `max` do tasks.md vira
-  `xhigh`, teto do Codex), saída `--json` (JSONL → stream da tarefa no
-  ledger), sandbox `paralelo.sandbox` (default `workspace-write`) e
-  `--add-dir <repo>` — o `.git` compartilhado dos worktrees mora no repo
-  principal e sem isso o sandbox bloquearia o commit. O resumo por minuto usa
-  `codex exec --sandbox read-only --ephemeral` com modelo barato
-  (`gpt-5.6-luna` quando `paralelo.resumoModel` ainda é um `claude-*`); o
-  default de modelo por tarefa vira `gpt-5.6-terra` quando `paralelo.model`
-  é um `claude-*` (um `Modelo: claude-*` explícito no tasks.md é trocado com
-  aviso; `--modelo claude-*` na flag é ERRO). Nunca depende do CLI do Claude.
+`plano <feature>` agrupa tarefas por conflito de arquivos em faixas; cada faixa
+tem branch/worktree próprios. `maxParalelas` limita concorrência. O modo
+`--paralelizar` seleciona tarefas; `--sequencial` mantém a ordem. Modelos e
+esforços vêm de escolha autorizada e são validados no harness atual, sem
+substituição silenciosa nem catálogo fixo.
 
-  **Custo é escolha do usuário**: o `plano` do codex imprime "modelos e
-  esforços deste plano" (linha por tarefa) e a skill obriga o agente a
-  CONFIRMAR com o usuário antes de executar. `--modelo <m>`/`--esforco <n>`
-  no `plano` travam TODAS as tarefas (vencem tasks.md e config; entram em
-  `modeloForcado`/`esforcoForcado` no plano.json e no "regenere com");
-  `onp-spec tarefa <feature> <T-xxx> [status] [--modelo <m>] [--esforco <n>]`
-  grava `- Modelo:`/`- Esforço:` na seção da tarefa no tasks.md (substitui se
-  existir, insere se não) para ajuste por tarefa.
-- **cursor**: MESMOS artefatos e MESMO dispatcher do claude, trocando o CLI:
-  cada tarefa roda o CLI do Cursor (`agent -p`, com fallback para o nome
-  legado `cursor-agent`) com `--model` por tarefa, saída
-  `--output-format stream-json` (NDJSON → stream da tarefa no ledger) e
-  `--force` — sem `--force` o modo print do Cursor não modifica arquivos; o
-  controle fino é do usuário via `permissions.deny` em `.cursor/cli.json`,
-  que vence o `--force`. **Não existe flag de esforço no CLI do Cursor**: o
-  nível vai embutido no slug do modelo (ex.: `gpt-5.6-terra-high`), então o
-  `Esforço:` do tasks.md é informativo nesse plano (o artefato avisa).
-  Modelos `claude-*` são slugs VÁLIDOS no Cursor — nada é trocado; só o
-  modelo do resumo por minuto vira `composer` (modelo da casa, uso incluído)
-  enquanto `paralelo.resumoModel` for o default `claude-haiku-4-5`. O resumo
-  por minuto roda `agent -p` SEM `--force` (somente leitura por construção).
-  O plano imprime "modelos deste plano" e a skill obriga o agente a
-  CONFIRMAR com o usuário antes de executar (claude-*/gpt-* são cobrados por
-  uso no plano do Cursor; a rota de economia é `--modelo composer`). Nunca
-  depende do CLI do Claude nem do Codex.
-- **antigravity**: o md ganha comandos de worktree e um prompt pronto por
-  faixa para os agentes paralelos nativos — nunca depende de CLI nenhum.
+Artefatos: `plano-execucao.md`, `plano.json` e `executar-tarefas.mjs`. O primeiro
+plano nativo usa a raiz da feature apenas se nenhum artefato de plano existe.
+Se já há Markdown, JSON, script ou HTML, a nova versão fica em
+`execucoes/<runId>/`; os arquivos anteriores não são reescritos nem apagados.
+O executor
+Node usa os CLIs nativos e argumentos estruturados; não depende de Bash para
+funcionar em macOS, Linux e Windows. Um wrapper `.sh` de compatibilidade não
+é a implementação. Scripts legados permanecem disponíveis sem regeneração
+obrigatória. Não há geração de painel HTML, e HTML antigo é preservado.
+Plano/tarefas, perguntas,
+agentes, revisão e notificações ficam nas ferramentas nativas expostas.
 
-**Paralelizar é escolha do usuário — inclusive QUAIS tarefas**: o agente
-apresenta o plano como recomendação e pergunta antes de executar.
-`--paralelizar T-001,T-003` restringe as faixas às tarefas ESCOLHIDAS (o
-resto vai para `sequenciais` com `motivoSeq` "fora da seleção do usuário";
-id desconhecido ou seleção vazia é erro amigável; a seleção sai em
-`paralelizar` no plano.json e no "regenere com" dos artefatos).
-`--sequencial` gera o plano com TODAS as tarefas em `sequenciais` (uma após a
-outra, na árvore principal, sem worktrees — `modo: "sequencial"` no
-plano.json), reaproveitando o mesmo executor, a mesma disciplina de commits e
-o mesmo gate.
+`executar <feature>` seleciona o plano nativo mais recente; `--run <id>`
+seleciona a execução exata e o wrapper gerado fixa esse identificador.
+`--faixa`, `--seq`, `--gate` e `--listar` permitem operar alvos específicos. Checkpoints preservam tarefas concluídas,
+sessões e worktrees. Uma espera por cota não apaga estado nem reexecuta sucesso.
+O gate atual (verify + audit) continua obrigatório para conclusão.
 
-`onp-spec tarefa <feature> <T-xxx> <status>` é o utilitário mecânico de
-atualização de status usado pelo executor (e por humanos).
+## Harness e cota (src/core/harness.js + src/core/quota.js)
 
-O plano também sai em `plano.json` (leitura de máquina) e o script emite uma
-trilha de eventos (faixa executando/mesclada/conflito, tarefas, gate, fim,
-resumo) para o ledger global — é o que alimenta o `onp-spec resumo`.
+Os adaptadores consultam capacidades reais de Claude Code, Codex, Cursor,
+Antigravity e OpenCode. Fontes de modelos: inicialização Claude, app-server
+Codex, listagem do Cursor, `agy models` e `opencode models`. Os comandos são
+resolvidos na plataforma instalada; nomes fixos de versões não são defaults.
+Notificações usam APIs/configuração do harness quando habilitadas.
+
+Cota é observada na fonte nativa documentada ou ponte para ela. Janela de
+contexto, tokens consumidos e preço não estabelecem saldo da conta. Em <=5%
+restantes de janela aplicável, suspenda novos despachos e preserve o trabalho;
+use reset informado/backoff e nova consulta antes de retomar. Cota desconhecida
+é explícita, sem saldo fabricado ou endpoints privados. Timers de sessão só
+funcionam enquanto o processo está vivo; checkpoint permite retomada após
+reinício, mas não liga um computador desligado.
+
+## Worktrees e encerramento
+
+`worktrees <feature>` consulta planos arquivados no diretório Git comum
+(`src/core/execution-history.js`), valida identidade/hash e lista worktrees
+com `runId`, sem depender do `plano.json` atual. `--run <id>` filtra a execução. Ao final da sessão a
+skill pergunta pelo mecanismo nativo se deve limpá-los. Após autorização,
+`--run <id> --limpar --confirmar` remove somente candidatos seguros; alterações locais,
+commits não integrados e execuções ativas são preservados. Não há `--force`
+automático nem limpeza global. Em espera noturna de cota, mantenha os worktrees.
 
 ## Ledger global (src/core/ledger.js)
 
@@ -278,9 +269,11 @@ caminho é herança histórica). Cada linha é um evento (`plano`, `inicio`,
 `faixa`, `tarefa`, `gate`, `fim`, `resumo`) carimbado com `runId`,
 `projeto`, `projetoDir` e `feature` — então um mesmo ledger cobre quantos
 projetos existirem, e `montarArvore()` reconstrói projeto → execução → faixa →
-tarefa a partir dele. `podarLedger()` mantém as 30 execuções mais recentes e
-apaga os streams das antigas. Linha corrompida é ignorada, nunca derruba a
-leitura.
+tarefa a partir dele. `podarLedger()` permanece disponível por compatibilidade
+para manutenção explícita: mantém as 30 execuções mais recentes e remove
+streams anteriores. Instalar a skill e gerar planos não chamam essa poda;
+o histórico existente é preservado. Linha corrompida é ignorada, nunca derruba
+a leitura.
 
 Regra de honestidade embutida na árvore: **trabalho novo invalida o veredito
 anterior** (`gateDesatualizado`), então uma execução só aparece "concluída"
@@ -302,26 +295,13 @@ tamanho e leitura incremental por cursor de linhas. Observação honesta: em hea
 `thinking` costuma vir redigido (vazio + signature); a contagem de
 `system/thinking_tokens` mostra a atividade sem inventar raciocínio.
 
-## Resumo geral de andamento (src/core/resumo.js)
+## Resumo textual (src/core/resumo.js)
 
-`onp-spec resumo [feature]` é a resposta de "o que está rolando agora?" em
-texto — o agente posta esse parágrafo no chat a cada ~1 min enquanto houver
-execução; **não existe servidor nem UI web**: o acompanhamento é chat e
-terminal, por decisão de produto. `--tabela` (`tabelaAndamento()`) imprime a
-**tabela de andamento** em markdown — uma linha por tarefa (onde roda,
-status ⏳/▶️/✅/❌ e última ação do stream; células higienizadas de pipes e
-quebras), com rodapé de faixas falhadas e gate — pronta para o agente colar
-no chat junto com o texto; a execução roda em background e o usuário recebe
-o resumo completo ao final.
-
-Duas origens, sempre rotuladas: `ia` (o executor claude/codex grava via
-`resumo --gravar --origem ia --texto`; no Antigravity é o próprio agente que
-escreve) e `motor` (determinístico: `resumoDeterministico()` narra a árvore
-do ledger — concluídas, tarefa em execução com a última ação do stream via
-`ultimaAcao()` (tail barato do NDJSON), falhas/conflitos e gate). Regra de
-frescor em `montarResumoAtual()`: resumo de IA com mais de 2 min perde para o
-do motor — um texto velho afirmando "executando" seria mentira. `--contexto`
-imprime o estado mecânico que o modelo narrador consome.
+`resumo [feature]` e `--tabela` são consultas determinísticas para inspeção
+pontual. O acompanhamento normal atualiza o plano/tarefas nativos por eventos.
+Não há tabela periódica obrigatória, servidor/painel ou chamada de modelo a
+cada minuto. Registros de resumo antigos continuam legíveis por compatibilidade;
+texto de IA velho não substitui estado mecânico atual.
 
 ## Camada de lições (src/core/sinais.js + src/core/licoes.js)
 

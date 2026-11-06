@@ -7,6 +7,7 @@ import { parseSpec } from '../parsers/spec.js';
 import { parseTasks } from '../parsers/tasks.js';
 import { parseConstitution } from '../parsers/constitution.js';
 import { walkFiles, scanAnnotations } from '../parsers/annotations.js';
+import { globToRegExp, anyGlobMatch } from '../util/text.js';
 
 export function loadProject(config) {
   const { rootDir, specDir } = config;
@@ -80,14 +81,14 @@ export function loadProject(config) {
   }
 
   // arquivos de teste e de código
-  project.testFiles = walkFiles(rootDir, {
-    includeGlobs: config.testGlobs,
+  const candidates = walkFiles(rootDir, {
+    includeGlobs: [...config.testGlobs, ...config.srcGlobs],
     ignoreGlobs: config.ignoreGlobs,
   });
-  project.srcFiles = walkFiles(rootDir, {
-    includeGlobs: config.srcGlobs,
-    ignoreGlobs: [...config.ignoreGlobs, ...config.testGlobs],
-  });
+  const tests = config.testGlobs.map(globToRegExp);
+  const sources = config.srcGlobs.map(globToRegExp);
+  project.testFiles = candidates.filter((file) => anyGlobMatch(file, tests));
+  project.srcFiles = candidates.filter((file) => anyGlobMatch(file, sources) && !anyGlobMatch(file, tests));
   project.annotations = scanAnnotations(rootDir, [
     ...new Set([...project.testFiles, ...project.srcFiles]),
   ]);

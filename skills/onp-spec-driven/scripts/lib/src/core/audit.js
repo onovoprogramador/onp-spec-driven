@@ -11,6 +11,7 @@ import path from 'path';
 import { allAcs, SPEC_STATUSES, ASM_STATUSES, Q_STATUSES } from '../parsers/spec.js';
 import { grepPattern } from '../parsers/annotations.js';
 import { latestMtime } from './project.js';
+import { checkGovernance, isGovernanceEnrolled } from './governance.js';
 
 // severidade base; em modo --ci os códigos em CI_ESCALATES viram erro
 const CI_ESCALATES = new Set(['AC_SEM_PROVA', 'VERIFY_OBSOLETO', 'Q_ABERTA', 'AC_SEM_TASK', 'ARQUIVO_ORFAO']);
@@ -25,6 +26,18 @@ export function auditProject(project, { ci = false } = {}) {
 
   for (const err of project.errors) {
     findings.push(finding('PROJETO_INVALIDO', 'erro', err));
+  }
+
+  // O CI não pode contornar o gate documental de features governadas.
+  // Documentos legados mantêm o contrato original, independentemente de
+  // formato/tamanho e mesmo quando outra feature adota o contrato novo.
+  for (const feature of project.features) {
+    if (!isGovernanceEnrolled(config.rootDir, feature.name, { specDir: config.specDir })) continue;
+    const completed = feature.tasks?.tasks?.length > 0 && feature.tasks.tasks.every((task) => task.status === 'concluida');
+    const check = checkGovernance(config.rootDir, feature.name, { specDir: config.specDir, historical: completed });
+    for (const issue of check.issues) findings.push(finding(issue.code, 'erro', issue.message, {
+      feature: feature.name, file: path.join(config.specDir, 'features', feature.name, 'governance.json'),
+    }));
   }
 
   const testFileSet = new Set(project.testFiles);

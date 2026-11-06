@@ -30,3 +30,8 @@ export { parseSpec, allAcs } from './parsers/spec.js';
 export { parseTasks } from './parsers/tasks.js';
 export { parseConstitution } from './parsers/constitution.js';
 export { run as runCli } from './cli.js';
+
+export { discoverModels, readQuota, buildInvocation, selectModel, HARNESS_CAPABILITIES } from './core/harness.js';
+export { quotaDecision, waitForQuota } from './core/quota.js';
+export { executePlan, listExecutionWorktrees, cleanupExecutionWorktrees } from './core/executor.js';
+export { scaffoldGovernance, checkGovernance, recordImpactReview, recordGovernanceDecision } from './core/governance.js';

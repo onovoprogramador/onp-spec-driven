@@ -14,10 +14,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(__dirname, '..', 'bin', 'onp-spec.js');
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'onpspec-e2e-'));
+// Este cenário implementa app/testes em ESM; o projeto declara seu formato,
+// inclusive em Node 18, que não faz detecção automática de sintaxe.
+writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'module' }));
 after(() => rmSync(root, { recursive: true, force: true }));
 
 function cli(...args) {
-  const proc = spawnSync('node', [BIN, ...args], { cwd: root, encoding: 'utf-8' });
+  const proc = spawnSync(process.execPath, [BIN, ...args], { cwd: root, encoding: 'utf-8' });
   return { code: proc.status, out: `${proc.stdout}\n${proc.stderr}` };
 }
 

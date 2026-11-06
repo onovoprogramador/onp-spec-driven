@@ -24,10 +24,8 @@ export const DEFAULT_CONFIG = {
   paralelo: {
     // máximo de faixas rodando ao mesmo tempo numa onda
     maxParalelas: 3,
-    // modelo default por tarefa (tasks.md pode sobrescrever com `- Modelo:`;
-    // claude-sonnet-5 também é slug válido no Cursor — no codex vira
-    // gpt-5.6-terra, que é da família dele)
-    model: 'claude-sonnet-5',
+    // null resolve o default real do catálogo do harness na execução.
+    model: null,
     // esforço default: baixo|medio|alto|xalto|max (ou low|medium|high|xhigh|max)
     esforco: 'medium',
     // modo de permissão do claude headless; para rodar 100% sem prompts o
@@ -39,11 +37,11 @@ export const DEFAULT_CONFIG = {
     // e caminhos fora do workspace o usuário pode trocar para
     // danger-full-access (decisão explícita dele)
     sandbox: 'workspace-write',
-    // modelo que escreve o "resumo geral de andamento" a cada minuto
-    // (default do claude; no codex o plano usa gpt-5.6-luna se este valor
-    // continuar sendo um modelo claude-*; no cursor vira composer enquanto
-    // este valor for o default — claude-haiku-4-5 não é slug do Cursor)
-    resumoModel: 'claude-haiku-4-5',
+    // Probe/hook nativo opcional: [executável, ...args]; sem shell.
+    quotaCommand: null,
+    modelsCommand: null,
+    notifications: { enabled: false, command: null },
+    quota: { thresholdPercent: 5, pollIntervalMs: 60000 },
   },
 };
 
